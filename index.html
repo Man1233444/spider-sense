@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Spider Sense</title>
+<title>Spider Sense VR</title>
 <style>
 body {
   margin: 0;
@@ -10,29 +10,44 @@ body {
   color: white;
   font-size: 22px;
   text-align: center;
+  overflow: hidden;
+}
+#status {
+  position: absolute;
+  top: 10px;
+  width: 100%;
+  text-align: center;
+  z-index: 10;
+}
+#camera-container {
+  display: flex;
+  flex-direction: row;
 }
 video {
-  width: 100%;
+  width: 50%;
   height: auto;
 }
 </style>
 </head>
 <body>
 
-<h1>Spider Sense Active</h1>
-<p id="status">Starting back camera...</p>
-<video id="camera" autoplay playsinline></video>
+<h1 id="status">Initializing VR Spider Sense...</h1>
+<div id="camera-container">
+  <video id="camera-left" autoplay playsinline></video>
+  <video id="camera-right" autoplay playsinline></video>
+</div>
 
 <script>
-const video = document.getElementById("camera");
+const videoLeft = document.getElementById("camera-left");
+const videoRight = document.getElementById("camera-right");
 const statusText = document.getElementById("status");
 
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: { exact: "environment" } }
-})
+// Request rear camera
+navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" } } })
 .then(stream => {
-  video.srcObject = stream;
-  statusText.innerText = "Back camera active. Monitoring distance.";
+  videoLeft.srcObject = stream;
+  videoRight.srcObject = stream;
+  statusText.innerText = "Back camera active. VR Spider Sense running.";
   startDetection();
 })
 .catch(err => {
@@ -46,37 +61,38 @@ function startDetection() {
   const ctx = canvas.getContext("2d");
 
   setInterval(() => {
-    if (video.videoWidth === 0) return;
+    if (videoLeft.videoWidth === 0) return;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
+    canvas.width = videoLeft.videoWidth;
+    canvas.height = videoLeft.videoHeight;
+    ctx.drawImage(videoLeft, 0, 0);
 
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     if (lastFrame) {
       let totalDiff = 0;
-
       // Sample pixels for speed
       for (let i = 0; i < currentFrame.data.length; i += 40) {
         totalDiff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
       }
 
-      // WALL / CLOSE OBJECT THRESHOLD
-      if (totalDiff > 3000000) {
-        warnUser();
+      // Calculate vibration strength based on proximity
+      if (totalDiff > 1000000) {
+        let intensity = Math.min(Math.floor((totalDiff - 1000000) / 500000), 5);
+        // Create vibration pattern: stronger = longer / more pulses
+        let pattern = [];
+        for (let i = 0; i < intensity; i++) {
+          pattern.push(100, 50);
+        }
+        navigator.vibrate(pattern);
+
+        const beep = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
+        beep.play();
       }
     }
 
     lastFrame = currentFrame;
-  }, 300);
-}
-
-function warnUser() {
-  navigator.vibrate([100, 50, 100]);
-
-  const beep = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
-  beep.play();
+  }, 250);
 }
 </script>
 
