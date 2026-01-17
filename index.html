@@ -8,7 +8,7 @@ body {
   margin: 0;
   background: black;
   color: white;
-  font-size: 24px;
+  font-size: 22px;
   text-align: center;
 }
 video {
@@ -20,22 +20,24 @@ video {
 <body>
 
 <h1>Spider Sense Active</h1>
-<p id="status">Starting camera...</p>
+<p id="status">Starting back camera...</p>
 <video id="camera" autoplay playsinline></video>
 
 <script>
 const video = document.getElementById("camera");
 const statusText = document.getElementById("status");
 
-navigator.mediaDevices.getUserMedia({ video: true })
-  .then(stream => {
-    video.srcObject = stream;
-    statusText.innerText = "Camera active. Listening for danger.";
-    startDetection();
-  })
-  .catch(err => {
-    statusText.innerText = "Camera access denied.";
-  });
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: { exact: "environment" } }
+})
+.then(stream => {
+  video.srcObject = stream;
+  statusText.innerText = "Back camera active. Monitoring distance.";
+  startDetection();
+})
+.catch(err => {
+  statusText.innerText = "Back camera not available.";
+});
 
 let lastFrame = null;
 
@@ -44,6 +46,8 @@ function startDetection() {
   const ctx = canvas.getContext("2d");
 
   setInterval(() => {
+    if (video.videoWidth === 0) return;
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
@@ -51,22 +55,25 @@ function startDetection() {
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     if (lastFrame) {
-      let diff = 0;
-      for (let i = 0; i < currentFrame.data.length; i += 4) {
-        diff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
+      let totalDiff = 0;
+
+      // Sample pixels for speed
+      for (let i = 0; i < currentFrame.data.length; i += 40) {
+        totalDiff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
       }
 
-      if (diff > 5000000) {
+      // WALL / CLOSE OBJECT THRESHOLD
+      if (totalDiff > 3000000) {
         warnUser();
       }
     }
 
     lastFrame = currentFrame;
-  }, 500);
+  }, 300);
 }
 
 function warnUser() {
-  navigator.vibrate(200);
+  navigator.vibrate([100, 50, 100]);
 
   const beep = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
   beep.play();
