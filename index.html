@@ -2,8 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Hand Aim – Back Camera</title>
+<title>3D Hand Aim – Back Camera</title>
 
+<!-- MediaPipe Hands -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
@@ -63,6 +64,11 @@ const ctx = canvas.getContext("2d");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
+// Previous fingertip for speed calculation
+let prevTip = null;
+// Previous wrist for rotation smoothing
+let prevWrist = null;
+
 start.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
@@ -71,6 +77,7 @@ start.addEventListener("click", async () => {
   await startBackCamera();
 });
 
+// === BACK CAMERA (Pixel 10 Pro reliable) ===
 async function startBackCamera() {
   debug.textContent = "Looking for back camera…";
 
@@ -91,6 +98,7 @@ async function startBackCamera() {
 
   video.srcObject = stream;
 
+  // === MediaPipe Hands Setup ===
   const hands = new Hands({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
@@ -112,12 +120,14 @@ async function startBackCamera() {
   loop();
 }
 
-// === Hand drawing + aim line ===
+// === 3D-Aware Hand Aim Drawing ===
 function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
     debug.textContent = "Back camera active – NO HAND";
+    prevTip = null;
+    prevWrist = null;
     return;
   }
 
@@ -125,51 +135,79 @@ function onResults(results) {
 
   const landmarks = results.multiHandLandmarks[0];
 
+  // --- Smooth landmarks ---
+  for (let i = 0; i < landmarks.length; i++) {
+    if (!landmarks[i].prev) landmarks[i].prev = { x: landmarks[i].x, y: landmarks[i].y, z: landmarks[i].z };
+    landmarks[i].x = 0.5 * landmarks[i].x + 0.5 * landmarks[i].prev.x;
+    landmarks[i].y = 0.5 * landmarks[i].y + 0.5 * landmarks[i].prev.y;
+    landmarks[i].z = 0.5 * landmarks[i].z + 0.5 * landmarks[i].prev.z;
+    landmarks[i].prev.x = landmarks[i].x;
+    landmarks[i].prev.y = landmarks[i].y;
+    landmarks[i].prev.z = landmarks[i].z;
+  }
+
   drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: "cyan", lineWidth: 3 });
   drawLandmarks(ctx, landmarks, { color: "yellow", radius: 4 });
 
+  const wrist = landmarks[0];
   const base = landmarks[5]; // index finger base
-  const tip = landmarks[8];  // index finger tip
+  const tip = landmarks[8];  // index fingertip
 
   const startX = base.x * canvas.width;
   const startY = base.y * canvas.height;
 
-  const dx = tip.x - base.x;
-  const dy = tip.y - base.y;
-
- // Calculate normalized direction for index finger
-const dxNorm = (tip.x - base.x) * canvas.width;
-const dyNorm = (tip.y - base.y) * canvas.height;
-const length = Math.sqrt(dxNorm*dxNorm + dyNorm*dyNorm);
-if(length === 0) return;
-
-const nx = dxNorm / length;
-const ny = dyNorm / length;
-
-// Aim line physics
-let x = startX;
-let y = startY;
-let vx = nx * 300; // initial velocity scaled
-let vy = ny * 300;
-
-ctx.beginPath();
-ctx.moveTo(x, y);
-
-for (let i = 0; i < 50; i++) {
-  vy += 28; // gravity
-  x += vx * 0.02;
-  y += vy * 0.02;
-
-  // bounce off bottom
-  if(y > canvas.height * 0.9) {
-    vy *= -0.6;
+  // --- Compute hand rotation based on wrist to base ---
+  let rotX = 0, rotY = 0;
+  if (prevWrist) {
+    rotX = base.x - prevWrist.x;
+    rotY = base.y - prevWrist.y;
   }
+  prevWrist = { x: base.x, y: base.y };
 
-  ctx.lineTo(x, y);
-}
-ctx.strokeStyle = "lime";
-ctx.lineWidth = 4;
-ctx.stroke();
+  // --- Hand speed (distance fingertip moved) ---
+  let speed = 0.1; // default
+  if(prevTip) {
+    const dx = (tip.x - prevTip.x) * canvas.width;
+    const dy = (tip.y - prevTip.y) * canvas.height;
+    speed = Math.sqrt(dx*dx + dy*dy);
+  }
+  prevTip = { x: tip.x, y: tip.y };
+
+  // --- 3D-aware aim vector ---
+  const dxNorm = (tip.x - base.x) * canvas.width;
+  const dyNorm = (tip.y - base.y) * canvas.height;
+  const dzNorm = tip.z - base.z; // 3D depth component
+  const vecLength = Math.sqrt(dxNorm*dxNorm + dyNorm*dyNorm + dzNorm*dzNorm);
+  if(vecLength === 0) return;
+
+  // Normalize 3D vector
+  const nx = dxNorm / vecLength;
+  const ny = dyNorm / vecLength;
+  const nz = dzNorm / vecLength;
+
+  // --- Line length based on speed ---
+  const lineScale = Math.min(Math.max(speed * 20, 100), 600); // min 100, max 600
+
+  let x = startX;
+  let y = startY;
+  let vx = nx * lineScale;
+  let vy = ny * lineScale;
+
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+
+  for (let i = 0; i < 50; i++) {
+    vy += 28; // gravity
+    x += vx * 0.02;
+    y += vy * 0.02;
+
+    // bounce bottom
+    if(y > canvas.height * 0.9) {
+      vy *= -0.6;
+    }
+
+    ctx.lineTo(x, y);
+  }
 
   ctx.strokeStyle = "lime";
   ctx.lineWidth = 4;
