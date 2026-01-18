@@ -13,7 +13,6 @@ html, body {
   overflow: hidden;
 }
 
-/* START SCREEN */
 #start {
   position: fixed;
   inset: 0;
@@ -23,48 +22,24 @@ html, body {
   align-items: center;
   justify-content: center;
   font-size: 32px;
-  z-index: 20;
-}
-
-/* BLENDED CAMERA VIEW */
-#view {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
+  z-index: 10;
 }
 
 video {
-  position: absolute;
-  width: 60vw;
+  width: 100vw;
   height: 100vh;
   object-fit: cover;
-  top: 0;
-}
-
-#left {
-  left: 0;
-}
-
-#right {
-  right: 0;
-  mask-image: linear-gradient(to left, transparent 0%, black 30%);
-  -webkit-mask-image: linear-gradient(to left, transparent 0%, black 30%);
 }
 </style>
 </head>
 <body>
 
 <div id="start">TAP TO START</div>
-
-<div id="view">
-  <video id="left" autoplay playsinline></video>
-  <video id="right" autoplay playsinline></video>
-</div>
+<video id="camera" autoplay playsinline></video>
 
 <script>
 const start = document.getElementById("start");
-const left = document.getElementById("left");
-const right = document.getElementById("right");
+const video = document.getElementById("camera");
 
 start.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
@@ -79,48 +54,53 @@ function startCamera() {
     video: { facingMode: { exact: "environment" } }
   })
   .then(stream => {
-    left.srcObject = stream;
-    right.srcObject = stream;
+    video.srcObject = stream;
     startDetection();
   });
 }
 
-let lastFrame = null;
+let lastContrast = null;
 
 function startDetection() {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
 
   setInterval(() => {
-    if (left.videoWidth === 0) return;
+    if (video.videoWidth === 0) return;
 
-    canvas.width = left.videoWidth;
-    canvas.height = left.videoHeight;
-    ctx.drawImage(left, 0, 0);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
 
-    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
 
-    if (lastFrame) {
-      let diff = 0;
+    let brightness = [];
+    for (let i = 0; i < data.length; i += 40) {
+      brightness.push((data[i] + data[i+1] + data[i+2]) / 3);
+    }
 
-      for (let i = 0; i < frame.data.length; i += 40) {
-        diff += Math.abs(frame.data[i] - lastFrame.data[i]);
-      }
+    // Measure contrast (detail)
+    let avg = brightness.reduce((a,b)=>a+b,0) / brightness.length;
+    let variance = brightness.reduce((a,b)=>a + Math.abs(b - avg), 0);
 
-      if (diff > 700000) {
-        let strength = Math.min(Math.floor((diff - 700000) / 300000), 8);
+    if (lastContrast !== null) {
+      let diff = lastContrast - variance;
+
+      // WALL PROXIMITY TRIGGER
+      if (diff > 15000) {
+        let strength = Math.min(Math.floor(diff / 5000), 8);
         let pattern = [];
 
         for (let i = 0; i < strength; i++) {
-          pattern.push(180, 60);
+          pattern.push(200, 80);
         }
 
         navigator.vibrate(pattern);
       }
     }
 
-    lastFrame = frame;
-  }, 250);
+    lastContrast = variance;
+  }, 300);
 }
 </script>
 
