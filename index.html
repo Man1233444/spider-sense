@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Body Tracking AR – Fullscreen Start Button</title>
+<title>Body Tracking AR – Robust Version</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -16,7 +16,6 @@ html, body {
   overflow: hidden;
 }
 
-/* Video and canvas full screen */
 video, canvas {
   position: absolute;
   top: 0;
@@ -24,10 +23,9 @@ video, canvas {
   width: 100vw;
   height: 100vh;
   object-fit: cover;
-  pointer-events: none; /* allow taps to go through to button */
+  pointer-events: none;
 }
 
-/* Start button */
 #start {
   position: fixed;
   top: 0;
@@ -72,17 +70,16 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 let pose = null;
+let lastLandmarks = []; // store last frame for interpolation
 
 startBtn.addEventListener("click", async () => {
-  // Go full-screen
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
   }
-  startBtn.style.display = "none"; // hide start button
+  startBtn.style.display = "none";
   await startBackCamera();
 });
 
-// --- Start back camera ---
 async function startBackCamera() {
   debug.textContent = "Looking for back camera…";
 
@@ -103,7 +100,6 @@ async function startBackCamera() {
 
   video.srcObject = stream;
 
-  // --- Initialize MediaPipe Pose ---
   pose = new Pose({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
   });
@@ -111,13 +107,12 @@ async function startBackCamera() {
   pose.setOptions({
     modelComplexity: 1,
     smoothLandmarks: true,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7
+    minDetectionConfidence: 0.5, // lower to detect partially visible people
+    minTrackingConfidence: 0.5
   });
 
-  pose.onResults(drawLandmarksOnly);
+  pose.onResults(drawRobustLandmarks);
 
-  // Start the loop
   async function loop() {
     if(video.readyState >= 2) {
       await pose.send({ image: video });
@@ -128,8 +123,8 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Draw only yellow landmarks, no green lines ---
-function drawLandmarksOnly(results) {
+// --- Draw landmarks with robustness ---
+function drawRobustLandmarks(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.poseLandmarks) {
@@ -139,7 +134,22 @@ function drawLandmarksOnly(results) {
 
   debug.textContent = "Body detected";
 
-  results.poseLandmarks.forEach(lm => {
+  const landmarks = [];
+
+  // interpolate missing landmarks using last frame
+  results.poseLandmarks.forEach((lm, i) => {
+    if (lm.visibility < 0.5 && lastLandmarks[i]) {
+      // use last known position if current is unreliable
+      landmarks[i] = lastLandmarks[i];
+    } else {
+      landmarks[i] = lm;
+    }
+  });
+
+  lastLandmarks = landmarks;
+
+  // draw landmarks
+  landmarks.forEach(lm => {
     const x = lm.x * canvas.width;
     const y = lm.y * canvas.height;
     ctx.beginPath();
@@ -152,4 +162,3 @@ function drawLandmarksOnly(results) {
 
 </body>
 </html>
-
