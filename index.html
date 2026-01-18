@@ -2,20 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Multi-Person Predictive Skeleton AR</title>
+<title>Mobile AR Skeleton</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/examples/js/controls/OrbitControls.js"></script>
 
 <style>
-html, body { margin:0; padding:0; width:100%; height:100%; background:black; overflow:hidden;}
-video { position:absolute; top:0; left:0; width:100vw; height:100vh; object-fit:cover; pointer-events:none;}
-canvas { position:absolute; top:0; left:0;}
-#start {position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;background:black;color:white;font-size:36px;z-index:9999;cursor:pointer;}
-#debug {position:fixed;top:10px;left:10px;color:lime;font-size:16px;z-index:10;}
+html,body{margin:0;padding:0;width:100%;height:100%;background:black;overflow:hidden;}
+video{position:absolute;top:0;left:0;width:100vw;height:100vh;object-fit:cover;pointer-events:none;}
+canvas{position:absolute;top:0;left:0;}
+#start{position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;background:black;color:white;font-size:36px;z-index:9999;cursor:pointer;}
+#debug{position:fixed;top:10px;left:10px;color:lime;font-size:16px;z-index:10;}
 </style>
 </head>
 <body>
@@ -25,127 +23,79 @@ canvas { position:absolute; top:0; left:0;}
 <div id="debug">Initializing...</div>
 
 <script>
-// --- Elements ---
+// Elements
 const startBtn = document.getElementById("start");
 const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 
-// --- Three.js Scene ---
+// --- Three.js ---
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ alpha:true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight,0.1,1000);
+const renderer = new THREE.WebGLRenderer({alpha:true});
+renderer.setSize(window.innerWidth,window.innerHeight);
 document.body.appendChild(renderer.domElement);
+const light = new THREE.DirectionalLight(0xffffff,1); light.position.set(0,10,10); scene.add(light);
+const controls = new THREE.OrbitControls(camera,renderer.domElement);
+camera.position.set(0,1.5,3); controls.update();
 
-// Light
-const light = new THREE.DirectionalLight(0xffffff,1);
-light.position.set(0,10,10);
-scene.add(light);
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-camera.position.set(0,1.5,3);
-controls.update();
+// Skeleton
+const joints = [], bones=[];
+const jointGeo = new THREE.SphereGeometry(0.05,8,8);
+const jointMat = new THREE.MeshStandardMaterial({color:0xffff00});
+for(let i=0;i<33;i++){ const j=new THREE.Mesh(jointGeo,jointMat); scene.add(j); joints.push(j); }
+const bonesIndices=[[0,1],[1,2],[2,3],[0,4],[4,5],[5,6],[11,13],[13,15],[12,14],[14,16],[11,23],[23,25],[25,27],[12,24],[24,26],[26,28]];
+bonesIndices.forEach(([p,c])=>{const geom=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const line=new THREE.Line(geom,new THREE.LineBasicMaterial({color:0xffff00}));scene.add(line);bones.push({line,p,c});});
 
-// --- Multi-person skeletons ---
-const MAX_PEOPLE = 3; // max people we’ll track
-const people = [];
-for(let i=0;i<MAX_PEOPLE;i++){
-  const joints = [];
-  const bones = [];
-  const jointGeo = new THREE.SphereGeometry(0.05,8,8);
-  const jointMat = new THREE.MeshStandardMaterial({color:0xffff00});
-  for(let j=0;j<33;j++){
-    const joint = new THREE.Mesh(jointGeo,jointMat);
-    scene.add(joint);
-    joints.push(joint);
-  }
-  const bonesIndices = [
-    [0,1],[1,2],[2,3],[0,4],[4,5],[5,6],
-    [11,13],[13,15],[12,14],[14,16],
-    [11,23],[23,25],[25,27],[12,24],[24,26],[26,28]
-  ];
-  bonesIndices.forEach(([p,c])=>{
-    const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
-    const line = new THREE.Line(geom,new THREE.LineBasicMaterial({color:0xffff00}));
-    scene.add(line);
-    bones.push({line,p,c});
-  });
-  people.push({joints,bones,lastLandmarks:new Array(33).fill(null)});
-}
+// MediaPipe Pose
+let pose = null; let lastLandmarks = [];
 
-// --- Start camera ---
-startBtn.addEventListener("click", async()=>{
-  if(document.documentElement.requestFullscreen){await document.documentElement.requestFullscreen();}
+startBtn.addEventListener("click",async()=>{
+  if(document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
   startBtn.style.display="none";
   await startBackCamera();
 });
 
-// --- Start back camera ---
 async function startBackCamera(){
-  debug.textContent="Looking for back camera...";
+  debug.textContent="Looking for back camera…";
   const devices = await navigator.mediaDevices.enumerateDevices();
   const backCam = devices.find(d=>d.kind==="videoinput" && d.label.toLowerCase().includes("back"));
-  if(!backCam){debug.textContent="No back camera found!"; return;}
+  if(!backCam){debug.textContent="No back camera found!";return;}
   debug.textContent=`Back camera found: ${backCam.label}`;
-  const stream = await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:backCam.deviceId}, width:1280, height:720}, audio:false});
+  const stream = await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:backCam.deviceId},width:1280,height:720},audio:false});
   video.srcObject=stream;
 
-  // --- TensorFlow Pose Detection (multi-person) ---
-  const detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {modelType:'MultiPose'});
-  async function loop(){
-    const poses = await detector.estimatePoses(video,{flipHorizontal:false});
-    updatePeople(poses);
-    requestAnimationFrame(loop);
-  }
+  pose = new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+  pose.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  pose.onResults(updateSkeleton);
+
+  async function loop(){if(video.readyState>=2) await pose.send({image:video}); requestAnimationFrame(loop);}
   loop();
 }
 
-// --- Update people skeletons ---
-function updatePeople(poses){
-  for(let i=0;i<MAX_PEOPLE;i++){
-    const person = people[i];
-    const poseData = poses[i];
-    if(!poseData){ // no person detected, hold default pose
-      person.lastLandmarks = person.lastLandmarks.map(l=>l||{x:0.5,y:0.5,z:0});
-    } else {
-      poseData.keypoints.forEach((k,j)=>{
-        const x = k.x/video.videoWidth;
-        const y = k.y/video.videoHeight;
-        const z = k.z||0;
-        if(person.lastLandmarks[j]){
-          // smooth movement
-          person.lastLandmarks[j] = {x:person.lastLandmarks[j].x*0.8 + x*0.2,
-                                     y:person.lastLandmarks[j].y*0.8 + y*0.2,
-                                     z:person.lastLandmarks[j].z*0.8 + z*0.2};
-        } else {
-          person.lastLandmarks[j] = {x,y,z};
-        }
-      });
-    }
+function updateSkeleton(results){
+  if(!results.poseLandmarks) return;
+  results.poseLandmarks.forEach((l,i)=>{
+    if(l.visibility<0.5 && lastLandmarks[i]){
+      // interpolate
+      lastLandmarks[i]={x:lastLandmarks[i].x*0.8 + l.x*0.2,y:lastLandmarks[i].y*0.8 + l.y*0.2,z:lastLandmarks[i].z*0.8 + (l.z||0)*0.2};
+    }else{lastLandmarks[i]=l;}
+  });
 
-    // Update Three.js joints
-    person.lastLandmarks.forEach((l,j)=>{
-      const x = (l.x-0.5)*2;
-      const y = -(l.y-0.5)*2;
-      const z = -(l.z||0);
-      person.joints[j].position.set(x,y,z);
-    });
+  // Map to Three.js
+  lastLandmarks.forEach((l,i)=>{
+    const x=(l.x-0.5)*2; const y=-(l.y-0.5)*2; const z=-(l.z||0);
+    joints[i].position.set(x,y,z);
+  });
 
-    // Update bones
-    person.bones.forEach(b=>{
-      const p = person.joints[b.p].position;
-      const c = person.joints[b.c].position;
-      b.line.geometry.setFromPoints([p.clone(),c.clone()]);
-      b.line.geometry.attributes.position.needsUpdate = true;
-    });
-  }
+  bones.forEach(b=>{
+    const p=joints[b.p].position; const c=joints[b.c].position;
+    b.line.geometry.setFromPoints([p.clone(),c.clone()]);
+    b.line.geometry.attributes.position.needsUpdate=true;
+  });
 }
 
-// --- Render ---
-function animate(){
-  requestAnimationFrame(animate);
-  renderer.render(scene,camera);
-  controls.update();
-}
+// Render loop
+function animate(){requestAnimationFrame(animate);renderer.render(scene,camera);controls.update();}
 animate();
 </script>
 
