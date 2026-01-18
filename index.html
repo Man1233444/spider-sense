@@ -2,9 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Wrist Aim Ray</title>
+<title>Hand Ray</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <style>
 html, body {
@@ -27,10 +27,10 @@ video, canvas {
   inset: 0;
   background: black;
   color: white;
+  font-size: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 36px;
   z-index: 10;
 }
 </style>
@@ -63,58 +63,51 @@ async function startCamera() {
   });
   video.srcObject = stream;
 
-  const pose = new Pose({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
   });
 
-  pose.setOptions({
-    smoothLandmarks: true,
-    minDetectionConfidence: 0.6,
-    minTrackingConfidence: 0.6
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
   });
 
-  pose.onResults(draw);
+  hands.onResults(draw);
 
-  const loop = async () => {
-    if (video.readyState >= 2) await pose.send({ image: video });
+  async function loop() {
+    if (video.readyState >= 2) await hands.send({ image: video });
     requestAnimationFrame(loop);
-  };
+  }
   loop();
 }
 
 function draw(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!results.poseLandmarks) return;
+  if (!results.multiHandLandmarks) return;
 
-  // RIGHT ARM ONLY
-  const elbow = results.poseLandmarks[14];
-  const wrist = results.poseLandmarks[16];
-  if (!elbow || !wrist) return;
+  const hand = results.multiHandLandmarks[0];
 
-  const ex = elbow.x * canvas.width;
-  const ey = elbow.y * canvas.height;
+  // Wrist + middle finger base for direction
+  const wrist = hand[0];
+  const mid = hand[9];
+
   const wx = wrist.x * canvas.width;
   const wy = wrist.y * canvas.height;
 
-  // Direction = elbow → wrist
-  let dx = wx - ex;
-  let dy = wy - ey;
+  let dx = mid.x - wrist.x;
+  let dy = mid.y - wrist.y;
 
   const len = Math.hypot(dx, dy);
-  if (len < 10) return;
+  if (len < 0.01) return;
 
   dx /= len;
   dy /= len;
 
-  // Ray until screen edge
-  let t = Infinity;
-  if (dx > 0) t = (canvas.width - wx) / dx;
-  if (dx < 0) t = -wx / dx;
-  if (dy > 0) t = Math.min(t, (canvas.height - wy) / dy);
-  if (dy < 0) t = Math.min(t, -wy / dy);
-
-  const hitX = wx + dx * t;
-  const hitY = wy + dy * t;
+  // Extend ray far
+  const hitX = wx + dx * 2000;
+  const hitY = wy + dy * 2000;
 
   // Draw ray
   ctx.beginPath();
@@ -124,9 +117,9 @@ function draw(results) {
   ctx.lineWidth = 4;
   ctx.stroke();
 
-  // Impact
+  // Impact indicator
   ctx.beginPath();
-  ctx.arc(hitX, hitY, 40, 0, Math.PI * 2);
+  ctx.arc(hitX, hitY, 30, 0, Math.PI * 2);
   ctx.fillStyle = "red";
   ctx.fill();
 }
