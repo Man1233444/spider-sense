@@ -4,54 +4,65 @@
 <meta charset="UTF-8">
 <title>Spider Sense VR</title>
 <style>
-body {
+html, body {
   margin: 0;
+  padding: 0;
   background: black;
-  color: white;
-  font-size: 22px;
-  text-align: center;
   overflow: hidden;
-}
-#status {
-  position: absolute;
-  top: 10px;
   width: 100%;
-  text-align: center;
-  z-index: 10;
+  height: 100%;
 }
-#camera-container {
+
+#container {
   display: flex;
-  flex-direction: row;
+  width: 100vw;
+  height: 100vh;
 }
+
+.eye {
+  width: 45vw;
+  height: 100vh;
+}
+
+#gap {
+  width: 10vw; /* MIDDLE SPACE FOR VR */
+  background: black;
+}
+
 video {
-  width: 50%;
-  height: auto;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 </style>
 </head>
 <body>
 
-<h1 id="status">Initializing VR Spider Sense...</h1>
-<div id="camera-container">
-  <video id="camera-left" autoplay playsinline></video>
-  <video id="camera-right" autoplay playsinline></video>
+<div id="container">
+  <video id="left" class="eye" autoplay playsinline></video>
+  <div id="gap"></div>
+  <video id="right" class="eye" autoplay playsinline></video>
 </div>
 
 <script>
-const videoLeft = document.getElementById("camera-left");
-const videoRight = document.getElementById("camera-right");
-const statusText = document.getElementById("status");
+// FULLSCREEN ON TAP
+document.body.addEventListener("click", () => {
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen();
+  }
+}, { once: true });
 
-// Request rear camera
-navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" } } })
-.then(stream => {
-  videoLeft.srcObject = stream;
-  videoRight.srcObject = stream;
-  statusText.innerText = "Back camera active. VR Spider Sense running.";
-  startDetection();
+const left = document.getElementById("left");
+const right = document.getElementById("right");
+
+// BACK CAMERA
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: { exact: "environment" } }
 })
-.catch(err => {
-  statusText.innerText = "Back camera not available.";
+.then(stream => {
+  left.srcObject = stream;
+  right.srcObject = stream;
+  startDetection();
 });
 
 let lastFrame = null;
@@ -61,37 +72,35 @@ function startDetection() {
   const ctx = canvas.getContext("2d");
 
   setInterval(() => {
-    if (videoLeft.videoWidth === 0) return;
+    if (left.videoWidth === 0) return;
 
-    canvas.width = videoLeft.videoWidth;
-    canvas.height = videoLeft.videoHeight;
-    ctx.drawImage(videoLeft, 0, 0);
+    canvas.width = left.videoWidth;
+    canvas.height = left.videoHeight;
+    ctx.drawImage(left, 0, 0);
 
-    const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     if (lastFrame) {
-      let totalDiff = 0;
-      // Sample pixels for speed
-      for (let i = 0; i < currentFrame.data.length; i += 40) {
-        totalDiff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
+      let diff = 0;
+
+      // Sample pixels
+      for (let i = 0; i < frame.data.length; i += 40) {
+        diff += Math.abs(frame.data[i] - lastFrame.data[i]);
       }
 
-      // Calculate vibration strength based on proximity
-      if (totalDiff > 1000000) {
-        let intensity = Math.min(Math.floor((totalDiff - 1000000) / 500000), 5);
-        // Create vibration pattern: stronger = longer / more pulses
+      if (diff > 800000) {
+        let strength = Math.min(Math.floor((diff - 800000) / 400000), 6);
         let pattern = [];
-        for (let i = 0; i < intensity; i++) {
-          pattern.push(100, 50);
-        }
-        navigator.vibrate(pattern);
 
-        const beep = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
-        beep.play();
+        for (let i = 0; i < strength; i++) {
+          pattern.push(120, 60);
+        }
+
+        navigator.vibrate(pattern);
       }
     }
 
-    lastFrame = currentFrame;
+    lastFrame = frame;
   }, 250);
 }
 </script>
