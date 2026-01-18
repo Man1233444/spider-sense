@@ -2,9 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>3D Predictive AR Throw</title>
+<title>AR Body-Aware Aim</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <style>
@@ -63,8 +63,8 @@ const ctx = canvas.getContext("2d");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let prevTip = null;
-let prevWrist = null;
+let prevHand = null; // previous hand position for speed
+let prevShoulder = null; // for rotation smoothing
 
 start.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
@@ -95,76 +95,67 @@ async function startBackCamera() {
 
   video.srcObject = stream;
 
-  const hands = new Hands({
-    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  // --- MediaPipe Pose ---
+  const pose = new Pose({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
   });
 
-  hands.setOptions({
-    maxNumHands: 1,
+  pose.setOptions({
     modelComplexity: 1,
+    smoothLandmarks: true,
     minDetectionConfidence: 0.7,
     minTrackingConfidence: 0.7
   });
 
-  hands.onResults(onResults);
+  pose.onResults(onResults);
 
   async function loop() {
-    await hands.send({ image: video });
+    await pose.send({ image: video });
     requestAnimationFrame(loop);
   }
 
   loop();
 }
 
-// === Predictive trajectory for index finger (landmark 8) ===
+// === Draw trajectory based on hand & body ===
 function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-    debug.textContent = "Back camera active – NO HAND";
-    prevTip = null;
-    prevWrist = null;
+  if (!results.poseLandmarks) {
+    debug.textContent = "No body detected";
+    prevHand = null;
+    prevShoulder = null;
     return;
   }
 
-  debug.textContent = "Back camera active – HAND DETECTED";
+  debug.textContent = "Body detected";
 
-  const landmarks = results.multiHandLandmarks[0];
+  const landmarks = results.poseLandmarks;
 
-  // Smooth all landmarks
-  for (let i = 0; i < landmarks.length; i++) {
-    if (!landmarks[i].prev) landmarks[i].prev = { x: landmarks[i].x, y: landmarks[i].y, z: landmarks[i].z };
-    landmarks[i].x = 0.5 * landmarks[i].x + 0.5 * landmarks[i].prev.x;
-    landmarks[i].y = 0.5 * landmarks[i].y + 0.5 * landmarks[i].prev.y;
-    landmarks[i].z = 0.5 * landmarks[i].z + 0.5 * landmarks[i].prev.z;
-    landmarks[i].prev.x = landmarks[i].x;
-    landmarks[i].prev.y = landmarks[i].y;
-    landmarks[i].prev.z = landmarks[i].z;
-  }
-
-  drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: "cyan", lineWidth: 3 });
+  drawConnectors(ctx, landmarks, Pose.POSE_CONNECTIONS, { color: "cyan", lineWidth: 3 });
   drawLandmarks(ctx, landmarks, { color: "yellow", radius: 4 });
 
-  const wrist = landmarks[0];
-  const base = landmarks[5]; // index base
-  const tip = landmarks[8];  // index tip
+  // Use Right Shoulder (12), Right Elbow (14), Right Wrist (16) for aim
+  const shoulder = landmarks[12];
+  const elbow = landmarks[14];
+  const wrist = landmarks[16];
 
-  const startX = base.x * canvas.width;
-  const startY = base.y * canvas.height;
+  const startX = elbow.x * canvas.width;
+  const startY = elbow.y * canvas.height;
 
-  // Hand velocity (speed)
+  // Velocity based on wrist movement
   let speed = 0.1;
-  if(prevTip) {
-    const dx = (tip.x - prevTip.x) * canvas.width;
-    const dy = (tip.y - prevTip.y) * canvas.height;
+  if(prevHand) {
+    const dx = (wrist.x - prevHand.x) * canvas.width;
+    const dy = (wrist.y - prevHand.y) * canvas.height;
     speed = Math.sqrt(dx*dx + dy*dy);
   }
-  prevTip = { x: tip.x, y: tip.y };
+  prevHand = { x: wrist.x, y: wrist.y };
 
-  // 3D direction vector
-  const dxNorm = tip.x - base.x;
-  const dyNorm = tip.y - base.y;
-  const dzNorm = tip.z - base.z;
+  // 3D direction vector from elbow to wrist
+  const dxNorm = wrist.x - elbow.x;
+  const dyNorm = wrist.y - elbow.y;
+  const dzNorm = wrist.z - elbow.z;
 
   const vecLength = Math.sqrt(dxNorm*dxNorm + dyNorm*dyNorm + dzNorm*dzNorm);
   if(vecLength === 0) return;
@@ -173,10 +164,9 @@ function onResults(results) {
   const ny = dyNorm / vecLength;
   const nz = dzNorm / vecLength;
 
-  // Scale by hand speed
+  // Line length scales with speed
   const lineScale = Math.min(Math.max(speed * 20, 100), 600);
 
-  // --- Predict trajectory ---
   let x = startX;
   let y = startY;
   let vx = nx * lineScale;
@@ -185,21 +175,15 @@ function onResults(results) {
   ctx.beginPath();
   ctx.moveTo(x, y);
 
-  for (let i = 0; i < 100; i++) { // longer prediction
+  for (let i = 0; i < 100; i++) {
     vy += 28; // gravity
     x += vx * 0.02;
     y += vy * 0.02;
 
-    // bounce off bottom
-    if(y > canvas.height * 0.9) {
-      vy *= -0.6;
-      vx *= 0.9; // dampen horizontal after bounce
-    }
+    if(y > canvas.height * 0.9) vy *= -0.6; // bounce
+    if(x < 0 || x > canvas.width || y > canvas.height) break;
 
     ctx.lineTo(x, y);
-
-    // Stop prediction if off-screen
-    if(x < 0 || x > canvas.width || y > canvas.height) break;
   }
 
   ctx.strokeStyle = "lime";
