@@ -2,9 +2,11 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Hand Ray</title>
+<title>Hand Ray (Fixed)</title>
 
+<!-- REQUIRED MEDIAPIPE FILES -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <style>
 html, body {
@@ -53,16 +55,10 @@ canvas.height = innerHeight;
 start.onclick = async () => {
   await document.documentElement.requestFullscreen?.();
   start.remove();
-  startCamera();
+  startTracking();
 };
 
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" },
-    audio: false
-  });
-  video.srcObject = stream;
-
+function startTracking() {
   const hands = new Hands({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
   });
@@ -74,54 +70,54 @@ async function startCamera() {
     minTrackingConfidence: 0.7
   });
 
-  hands.onResults(draw);
+  hands.onResults(results => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  async function loop() {
-    if (video.readyState >= 2) await hands.send({ image: video });
-    requestAnimationFrame(loop);
-  }
-  loop();
-}
+    if (!results.multiHandLandmarks) return;
 
-function draw(results) {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!results.multiHandLandmarks) return;
+    const hand = results.multiHandLandmarks[0];
+    const wrist = hand[0];
+    const mid = hand[9];
 
-  const hand = results.multiHandLandmarks[0];
+    const wx = wrist.x * canvas.width;
+    const wy = wrist.y * canvas.height;
 
-  // Wrist + middle finger base for direction
-  const wrist = hand[0];
-  const mid = hand[9];
+    let dx = mid.x - wrist.x;
+    let dy = mid.y - wrist.y;
 
-  const wx = wrist.x * canvas.width;
-  const wy = wrist.y * canvas.height;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.001) return;
 
-  let dx = mid.x - wrist.x;
-  let dy = mid.y - wrist.y;
+    dx /= len;
+    dy /= len;
 
-  const len = Math.hypot(dx, dy);
-  if (len < 0.01) return;
+    const hitX = wx + dx * 2000;
+    const hitY = wy + dy * 2000;
 
-  dx /= len;
-  dy /= len;
+    // DRAW STRAIGHT LINE
+    ctx.beginPath();
+    ctx.moveTo(wx, wy);
+    ctx.lineTo(hitX, hitY);
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 4;
+    ctx.stroke();
 
-  // Extend ray far
-  const hitX = wx + dx * 2000;
-  const hitY = wy + dy * 2000;
+    // RED IMPACT CIRCLE
+    ctx.beginPath();
+    ctx.arc(hitX, hitY, 30, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
+  });
 
-  // Draw ray
-  ctx.beginPath();
-  ctx.moveTo(wx, wy);
-  ctx.lineTo(hitX, hitY);
-  ctx.strokeStyle = "lime";
-  ctx.lineWidth = 4;
-  ctx.stroke();
+  const camera = new Camera(video, {
+    onFrame: async () => {
+      await hands.send({ image: video });
+    },
+    width: 1280,
+    height: 720
+  });
 
-  // Impact indicator
-  ctx.beginPath();
-  ctx.arc(hitX, hitY, 30, 0, Math.PI * 2);
-  ctx.fillStyle = "red";
-  ctx.fill();
+  camera.start();
 }
 </script>
 
