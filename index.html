@@ -1,149 +1,166 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>AR Aim & Hit</title>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<title>AR Throw Predictor</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+
 <style>
 html, body {
-  margin: 0; padding: 0;
-  width: 100%; height: 100%;
-  overflow: hidden; background: black;
+  margin:0;
+  padding:0;
+  width:100%;
+  height:100%;
+  background:black;
+  overflow:hidden;
 }
+
 video, canvas {
-  position: absolute; top: 0; left: 0;
-  width: 100vw; height: 100vh;
-  object-fit: cover;
+  position:absolute;
+  top:0;
+  left:0;
+  width:100vw;
+  height:100vh;
+  object-fit:cover;
+  pointer-events:none;
 }
+
 #start {
-  position: fixed; top:0; left:0;
-  width:100vw; height:100vh;
-  display:flex; justify-content:center; align-items:center;
-  background:black; color:white; font-size:36px; z-index:9999; cursor:pointer;
+  position:fixed;
+  top:0;
+  left:0;
+  width:100vw;
+  height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:black;
+  color:white;
+  font-size:36px;
+  z-index:9999;
+  cursor:pointer;
 }
-#debug {position:fixed; top:10px; left:10px; color:lime; font-size:16px; z-index:10;}
+
+#debug {
+  position:fixed;
+  top:10px;
+  left:10px;
+  color:lime;
+  font-size:16px;
+  z-index:10;
+}
 </style>
 </head>
 <body>
 
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
+<div id="debug">Initializing…</div>
 <div id="start">TAP TO START</div>
-<div id="debug">Initializing...</div>
 
 <script>
+const startBtn = document.getElementById("start");
+const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const startBtn = document.getElementById("start");
-const debug = document.getElementById("debug");
+
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let camera = null;
+let pose = null;
+let lastHand = null;
+let handVelocity = {x:0,y:0,z:0};
+let lastTimestamp = null;
 
-// --- Hand Tracking ---
-const hands = new Hands({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-});
-hands.setOptions({
-  maxNumHands: 1,
-  modelComplexity: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
-});
-
-// --- Predictive projectile ---
-let trajectory = null;
-
-hands.onResults(results => {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  if(!results.multiHandLandmarks || results.multiHandLandmarks.length===0){
-    debug.textContent = "No hand detected";
-    return;
-  }
-
-  const hand = results.multiHandLandmarks[0];
-  debug.textContent = "Hand detected";
-
-  // Draw hand landmarks
-  hand.forEach(lm=>{
-    ctx.beginPath();
-    ctx.arc(lm.x*canvas.width, lm.y*canvas.height, 8, 0, Math.PI*2);
-    ctx.fillStyle = "yellow";
-    ctx.fill();
-  });
-
-  // --- Use wrist (landmark 0) as base, index finger tip (8) as aim ---
-  const wrist = hand[0];
-  const indexTip = hand[8];
-
-  // Draw aim line
-  ctx.beginPath();
-  ctx.moveTo(wrist.x*canvas.width, wrist.y*canvas.height);
-  ctx.lineTo(indexTip.x*canvas.width, indexTip.y*canvas.height);
-  ctx.strokeStyle = "cyan";
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // --- Predict landing point ---
-  const dx = indexTip.x - wrist.x;
-  const dy = indexTip.y - wrist.y;
-
-  // Simple projection factor (adjust for “throw distance”)
-  const factor = 1.5;
-  const landX = indexTip.x + dx*factor;
-  const landY = indexTip.y + dy*factor;
-
-  trajectory = {x:landX, y:landY};
-
-  // Draw landing marker
-  ctx.beginPath();
-  ctx.arc(trajectory.x*canvas.width, trajectory.y*canvas.height, 12, 0, Math.PI*2);
-  ctx.fillStyle = "red";
-  ctx.fill();
-});
-
-// --- Camera setup ---
-async function startBackCamera(){
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const backCam = devices.find(d=>d.kind==="videoinput" && d.label.toLowerCase().includes("back"));
-  if(!backCam){ debug.textContent="No back camera found!"; return; }
-
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video:{deviceId:{exact:backCam.deviceId}, width:1280, height:720}, audio:false
-  });
-  video.srcObject = stream;
-
-  camera = new Camera(video, {
-    onFrame: async ()=>{ await hands.send({image: video}); },
-    width:1280, height:720
-  });
-  camera.start();
-}
-
-startBtn.addEventListener("click", async()=>{
-  if(document.documentElement.requestFullscreen){
+startBtn.addEventListener("click", async () => {
+  if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
   }
   startBtn.style.display = "none";
   await startBackCamera();
 });
 
-// Optional: visualize predicted landing trajectory every frame
-function animate(){
-  requestAnimationFrame(animate);
-  if(trajectory){
-    ctx.beginPath();
-    ctx.arc(trajectory.x*canvas.width, trajectory.y*canvas.height, 10, 0, Math.PI*2);
-    ctx.fillStyle="rgba(255,0,0,0.3)";
-    ctx.fill();
-  }
-}
-animate();
+async function startBackCamera() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const backCamera = devices.find(d => d.kind === "videoinput" && d.label.toLowerCase().includes("back"));
+  if(!backCamera){ debug.textContent="No back camera found!"; return; }
 
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{deviceId:{exact:backCamera.deviceId}, width:1280, height:720},
+    audio:false
+  });
+  video.srcObject = stream;
+
+  pose = new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+  pose.setOptions({modelComplexity:2,smoothLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  pose.onResults(drawHandPredictor);
+
+  async function loop(){
+    if(video.readyState>=2) await pose.send({image:video});
+    requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// --- Main hand tracking + trajectory ---
+function drawHandPredictor(results){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(!results.poseLandmarks){ debug.textContent="No body detected"; return; }
+
+  debug.textContent="Tracking hand…";
+
+  // Use right hand (landmark 16 = wrist)
+  const hand = results.poseLandmarks[16];
+  const timestamp = performance.now()/1000;
+
+  // Calculate velocity vector
+  if(lastHand && lastTimestamp){
+    const dt = timestamp - lastTimestamp;
+    handVelocity.x = (hand.x - lastHand.x)/dt;
+    handVelocity.y = (hand.y - lastHand.y)/dt;
+    handVelocity.z = (hand.z - lastHand.z)/dt;
+  }
+
+  lastHand = hand;
+  lastTimestamp = timestamp;
+
+  // Draw hand
+  const hx = hand.x*canvas.width;
+  const hy = hand.y*canvas.height;
+  ctx.beginPath();
+  ctx.arc(hx,hy,10,0,Math.PI*2);
+  ctx.fillStyle="red";
+  ctx.fill();
+
+  // Predict trajectory points (simple linear with gravity)
+  const points = [];
+  let px = hand.x, py = hand.y, pz = hand.z;
+  let vx = handVelocity.x*0.05; // scale to canvas
+  let vy = handVelocity.y*0.05;
+  const g = 0.0015; // gravity effect per frame
+
+  for(let i=0;i<60;i++){
+    px += vx;
+    py += vy;
+    vy += g; // gravity
+    points.push({x:px*canvas.width, y:py*canvas.height});
+  }
+
+  // Draw predicted trajectory
+  ctx.beginPath();
+  for(let i=0;i<points.length;i++){
+    const p = points[i];
+    if(i===0) ctx.moveTo(p.x,p.y);
+    else ctx.lineTo(p.x,p.y);
+  }
+  ctx.strokeStyle="lime";
+  ctx.lineWidth=3;
+  ctx.stroke();
+}
 </script>
+
 </body>
 </html>
