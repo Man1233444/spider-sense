@@ -2,14 +2,13 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Wrist Ray AR</title>
+<title>Wrist Aim Ray</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
 <style>
 html, body {
   margin: 0;
-  padding: 0;
   width: 100%;
   height: 100%;
   background: black;
@@ -18,25 +17,21 @@ html, body {
 
 video, canvas {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  pointer-events: none;
 }
 
 #start {
   position: fixed;
   inset: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   background: black;
   color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 36px;
-  z-index: 9999;
-  cursor: pointer;
+  z-index: 10;
 }
 </style>
 </head>
@@ -47,50 +42,38 @@ video, canvas {
 <div id="start">TAP TO START</div>
 
 <script>
-const startBtn = document.getElementById("start");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const start = document.getElementById("start");
 
 canvas.width = innerWidth;
 canvas.height = innerHeight;
 
-let pose;
-
-// START
-startBtn.onclick = async () => {
+start.onclick = async () => {
   await document.documentElement.requestFullscreen?.();
-  startBtn.remove();
+  start.remove();
   startCamera();
 };
 
 async function startCamera() {
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const backCam = devices.find(d =>
-    d.kind === "videoinput" && d.label.toLowerCase().includes("back")
-  );
-
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: backCam
-      ? { deviceId: { exact: backCam.deviceId } }
-      : { facingMode: "environment" },
+    video: { facingMode: "environment" },
     audio: false
   });
-
   video.srcObject = stream;
 
-  pose = new Pose({
+  const pose = new Pose({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
   });
 
   pose.setOptions({
-    modelComplexity: 1,
     smoothLandmarks: true,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6
   });
 
-  pose.onResults(drawRay);
+  pose.onResults(draw);
 
   const loop = async () => {
     if (video.readyState >= 2) await pose.send({ image: video });
@@ -99,34 +82,41 @@ async function startCamera() {
   loop();
 }
 
-// DRAW STRAIGHT RAY FROM WRIST
-function drawRay(results) {
+function draw(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   if (!results.poseLandmarks) return;
 
-  // RIGHT WRIST ONLY
+  // RIGHT ARM ONLY
+  const elbow = results.poseLandmarks[14];
   const wrist = results.poseLandmarks[16];
-  if (!wrist || wrist.visibility < 0.5) return;
+  if (!elbow || !wrist) return;
 
+  const ex = elbow.x * canvas.width;
+  const ey = elbow.y * canvas.height;
   const wx = wrist.x * canvas.width;
   const wy = wrist.y * canvas.height;
 
-  // Direction: straight forward (upwards on screen)
-  const dx = 0;
-  const dy = -1;
+  // Direction = elbow → wrist
+  let dx = wx - ex;
+  let dy = wy - ey;
 
-  // Find wall hit
+  const len = Math.hypot(dx, dy);
+  if (len < 10) return;
+
+  dx /= len;
+  dy /= len;
+
+  // Ray until screen edge
   let t = Infinity;
-  if (dy < 0) t = wy / -dy;
-  if (dy > 0) t = (canvas.height - wy) / dy;
-  if (dx < 0) t = Math.min(t, wx / -dx);
-  if (dx > 0) t = Math.min(t, (canvas.width - wx) / dx);
+  if (dx > 0) t = (canvas.width - wx) / dx;
+  if (dx < 0) t = -wx / dx;
+  if (dy > 0) t = Math.min(t, (canvas.height - wy) / dy);
+  if (dy < 0) t = Math.min(t, -wy / dy);
 
   const hitX = wx + dx * t;
   const hitY = wy + dy * t;
 
-  // Draw straight line
+  // Draw ray
   ctx.beginPath();
   ctx.moveTo(wx, wy);
   ctx.lineTo(hitX, hitY);
@@ -134,7 +124,7 @@ function drawRay(results) {
   ctx.lineWidth = 4;
   ctx.stroke();
 
-  // Draw wall hit
+  // Impact
   ctx.beginPath();
   ctx.arc(hitX, hitY, 40, 0, Math.PI * 2);
   ctx.fillStyle = "red";
