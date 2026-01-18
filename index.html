@@ -2,153 +2,151 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AR Predictive Throw</title>
+<title>AR Aim and Throw Tracker</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <style>
-html, body {margin:0;padding:0;width:100%;height:100%;background:black;overflow:hidden;}
-video {position:absolute;top:0;left:0;width:100vw;height:100vh;object-fit:cover;pointer-events:none;}
-canvas {position:absolute;top:0;left:0;}
-#start {position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;background:black;color:white;font-size:36px;z-index:9999;cursor:pointer;}
-#debug {position:fixed;top:10px;left:10px;color:lime;font-size:16px;z-index:10;}
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: black;
+  overflow: hidden;
+}
+
+video, canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+#start {
+  position: fixed;
+  top:0; left:0;
+  width:100vw; height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:black;
+  color:white;
+  font-size:36px;
+  z-index:9999;
+  cursor:pointer;
+}
 </style>
 </head>
 <body>
 
 <video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
 <div id="start">TAP TO START</div>
-<div id="debug">Initializing...</div>
 
 <script>
-// --- Elements ---
-const startBtn = document.getElementById("start");
-const debug = document.getElementById("debug");
 const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const startBtn = document.getElementById("start");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-// --- Three.js Scene ---
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight,0.1,1000);
-const renderer = new THREE.WebGLRenderer({alpha:true});
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
+// --- Physics simulation for AR trajectory ---
+const gravity = 0.98; // gravity acceleration
+let lastTime = performance.now();
 
-const light = new THREE.DirectionalLight(0xffffff,1);
-light.position.set(0,10,10);
-scene.add(light);
+// --- Initialize MediaPipe Hands ---
+const hands = new Hands({locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.8,
+  minTrackingConfidence: 0.8
+});
 
-const controls = new THREE.OrbitControls(camera,renderer.domElement);
-camera.position.set(0,1.5,3);
-controls.update();
+// Store last hand position for velocity calculation
+let lastHandPos = null;
 
-// --- Hand Joint Spheres ---
-const jointGeo = new THREE.SphereGeometry(0.03,8,8);
-const jointMat = new THREE.MeshStandardMaterial({color:0xffff00});
-const joints = [];
-for(let i=0;i<21;i++){
-  const joint = new THREE.Mesh(jointGeo,jointMat);
-  scene.add(joint);
-  joints.push(joint);
-}
-
-// --- Trajectory Prediction Line ---
-let trajectoryLine;
-const trajMat = new THREE.LineBasicMaterial({color:0x00ff00,linewidth:2});
-const trajGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3()]);
-trajectoryLine = new THREE.Line(trajGeom,trajMat);
-scene.add(trajectoryLine);
-
-// --- Hand Tracking ---
-let hands = null;
-let lastPositions = [];
-
-startBtn.addEventListener("click", async()=>{
-  startBtn.style.display="none";
+// --- Start button ---
+startBtn.addEventListener("click", async () => {
   if(document.documentElement.requestFullscreen){
     await document.documentElement.requestFullscreen();
   }
-
-  debug.textContent="Starting back camera...";
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const backCam = devices.find(d=>d.kind==="videoinput" && d.label.toLowerCase().includes("back"));
-  if(!backCam){debug.textContent="No back camera!"; return;}
-  const stream = await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:backCam.deviceId},width:1280,height:720},audio:false});
-  video.srcObject = stream;
-  debug.textContent="Camera started.";
-
-  hands = new Hands({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-  hands.setOptions({maxNumHands:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
-  hands.onResults(updateHand);
-
-  async function loop(){
-    if(video.readyState>=2){
-      await hands.send({image:video});
-    }
-    requestAnimationFrame(loop);
-  }
-  loop();
-  debug.textContent="Hand tracking started!";
+  startBtn.style.display = "none";
+  await startBackCamera();
 });
 
-// --- Predictive Trajectory Function ---
-function predictTrajectory(positions){
-  if(positions.length<2) return null;
-  const last = positions[positions.length-1];
-  const prev = positions[positions.length-2];
+async function startBackCamera() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const backCam = devices.find(d => d.kind==="videoinput" && d.label.toLowerCase().includes("back"));
+  if(!backCam){ alert("No back camera found"); return; }
 
-  const vx = last.x - prev.x;
-  const vy = last.y - prev.y;
-  const vz = last.z - prev.z;
-
-  const points = [];
-  let tStep = 0.05;
-  let g = -9.8;
-  let posX = last.x, posY = last.y, posZ = last.z;
-  let velX = vx*5, velY = vy*5, velZ = vz*5; // scale for AR units
-
-  for(let t=0;t<0.5;t+=tStep){
-    posX += velX*tStep;
-    posY += velY*tStep + 0.5*g*tStep*tStep;
-    velY += g*tStep;
-    posZ += velZ*tStep;
-    points.push(new THREE.Vector3(posX,posY,posZ));
-  }
-  return points;
-}
-
-// --- Update Hand & Trajectory ---
-function updateHand(results){
-  if(!results.multiHandLandmarks || results.multiHandLandmarks.length==0) return;
-  const lm = results.multiHandLandmarks[0];
-
-  lastPositions.push({x:lm[9].x-0.5,y:-(lm[9].y-0.5),z:-(lm[9].z||0)}); // use middle finger base as throw origin
-  if(lastPositions.length>5) lastPositions.shift();
-
-  // Update joint positions
-  lm.forEach((l,i)=>{
-    const x = l.x-0.5;
-    const y = -(l.y-0.5);
-    const z = -(l.z||0);
-    joints[i].position.set(x,y,z);
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{deviceId:{exact:backCam.deviceId}, width:1280, height:720}, audio:false
   });
+  video.srcObject = stream;
 
-  // Predict trajectory
-  const trajPoints = predictTrajectory(lastPositions);
-  if(trajPoints){
-    trajectoryLine.geometry.setFromPoints(trajPoints);
-    trajectoryLine.geometry.attributes.position.needsUpdate=true;
+  const camera = new Camera(video, {
+    onFrame: async () => { await hands.send({image: video}); },
+    width:1280, height:720
+  });
+  camera.start();
+}
+
+// --- Draw function ---
+hands.onResults(results => {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+    const hand = results.multiHandLandmarks[0];
+    const tip = hand[8]; // index finger tip
+    const x = tip.x * canvas.width;
+    const y = tip.y * canvas.height;
+
+    // Draw hand tip
+    ctx.beginPath();
+    ctx.arc(x,y,15,0,Math.PI*2);
+    ctx.fillStyle="yellow";
+    ctx.fill();
+
+    // Calculate velocity
+    let vx=0, vy=0;
+    if(lastHandPos){
+      const dt = (performance.now()-lastTime)/1000;
+      vx = (x-lastHandPos.x)/dt;
+      vy = (y-lastHandPos.y)/dt;
+    }
+    lastHandPos = {x,y};
+    lastTime = performance.now();
+
+    // Predict trajectory
+    const trajectoryPoints = [];
+    let px = x;
+    let py = y;
+    let tvx = vx;
+    let tvy = vy;
+    for(let i=0;i<50;i++){
+      tvy += gravity; // apply gravity
+      px += tvx*0.016; // assuming 60fps ~16ms
+      py += tvy*0.016;
+      if(py>canvas.height) break; // stop at "floor"
+      trajectoryPoints.push({x:px,y:py});
+    }
+
+    // Draw trajectory
+    ctx.beginPath();
+    ctx.moveTo(x,y);
+    trajectoryPoints.forEach(p=>{
+      ctx.lineTo(p.x,p.y);
+    });
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 3;
+    ctx.stroke();
   }
-}
-
-// --- Render ---
-function animate(){
-  requestAnimationFrame(animate);
-  renderer.render(scene,camera);
-  controls.update();
-}
-animate();
+});
 </script>
 
 </body>
