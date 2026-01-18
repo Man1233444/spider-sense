@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Hand Aim</title>
+<title>AR Hand Aim (Back Camera)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -79,6 +79,7 @@ function startHandTracking() {
     onFrame: async () => {
       await hands.send({ image: video });
     },
+    facingMode: { exact: "environment" },
     width: 1280,
     height: 720
   });
@@ -91,38 +92,44 @@ function onResults(results) {
 
   if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
     ctx.fillStyle = "red";
-    ctx.font = "24px sans-serif";
-    ctx.fillText("NO HAND DETECTED", 20, 40);
+    ctx.font = "22px sans-serif";
+    ctx.fillText("SHOW HAND TO CAMERA", 20, 40);
     return;
   }
 
   const landmarks = results.multiHandLandmarks[0];
 
-  // Draw hand skeleton (DEBUG)
-  drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: "cyan", lineWidth: 3 });
-  drawLandmarks(ctx, landmarks, { color: "yellow", radius: 4 });
+  // Draw hand (debug + confidence)
+  drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+    color: "cyan",
+    lineWidth: 3
+  });
+  drawLandmarks(ctx, landmarks, {
+    color: "yellow",
+    radius: 4
+  });
 
-  // Aim using index finger
+  // Index finger aiming
   const base = landmarks[5];
   const tip = landmarks[8];
 
   const startX = base.x * canvas.width;
   const startY = base.y * canvas.height;
 
-  const dx = (tip.x - base.x);
-  const dy = (tip.y - base.y);
+  const dx = tip.x - base.x;
+  const dy = tip.y - base.y;
 
   let x = startX;
   let y = startY;
 
-  let vx = dx * 1200;
-  let vy = dy * 1200;
+  let vx = dx * 1400;
+  let vy = dy * 1400;
 
   ctx.beginPath();
   ctx.moveTo(x, y);
 
-  for (let i = 0; i < 50; i++) {
-    vy += 25;
+  for (let i = 0; i < 55; i++) {
+    vy += 28; // gravity
     x += vx * 0.02;
     y += vy * 0.02;
     ctx.lineTo(x, y);
