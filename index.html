@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Body Tracking AR – Predictive Limb Estimation</title>
+<title>Body Tracking AR – Full Predictive 3D</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -72,19 +72,20 @@ canvas.height = window.innerHeight;
 let pose = null;
 let lastLandmarks = [];
 
-// Limb connections for prediction (parent → child)
+// Parent → child limb definitions
 const limbs = [
-  [11, 13], // left shoulder → left elbow
-  [13, 15], // left elbow → left wrist
-  [12, 14], // right shoulder → right elbow
-  [14, 16], // right elbow → right wrist
-  [23, 25], // left hip → left knee
-  [25, 27], // left knee → left ankle
-  [24, 26], // right hip → right knee
-  [26, 28], // right knee → right ankle
-  [11, 23], // left shoulder → left hip
-  [12, 24]  // right shoulder → right hip
+  [11, 13],[13, 15],[12, 14],[14, 16],
+  [23, 25],[25, 27],[24, 26],[26, 28],
+  [11, 23],[12, 24]
 ];
+
+// Proportion-based prediction for fully hidden joints
+const defaultProportions = {
+  upperArm: 0.25, // shoulder→elbow
+  lowerArm: 0.25, // elbow→wrist
+  upperLeg: 0.25, // hip→knee
+  lowerLeg: 0.25  // knee→ankle
+};
 
 startBtn.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
@@ -119,13 +120,13 @@ async function startBackCamera() {
   });
 
   pose.setOptions({
-    modelComplexity: 1,
+    modelComplexity: 2,  // highest model complexity
     smoothLandmarks: true,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
 
-  pose.onResults(drawPredictiveLandmarks);
+  pose.onResults(drawFullPredictiveLandmarks);
 
   async function loop() {
     if(video.readyState >= 2) {
@@ -137,8 +138,8 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Draw landmarks with predictive limb estimation ---
-function drawPredictiveLandmarks(results) {
+// --- Full predictive 3D tracking ---
+function drawFullPredictiveLandmarks(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.poseLandmarks) {
@@ -150,23 +151,21 @@ function drawPredictiveLandmarks(results) {
 
   const landmarks = [];
 
-  // Step 1: Copy landmarks or interpolate with last frame
+  // 1. Copy landmarks or fallback to last frame
   results.poseLandmarks.forEach((lm, i) => {
     if (lm.visibility < 0.5 && lastLandmarks[i]) {
-      landmarks[i] = lastLandmarks[i]; // fallback to previous frame
+      landmarks[i] = lastLandmarks[i];
     } else {
       landmarks[i] = lm;
     }
   });
 
-  // Step 2: Predict missing child joints using limb vectors
+  // 2. Predict hidden child joints using limb vectors
   limbs.forEach(([parentIdx, childIdx]) => {
     const parent = landmarks[parentIdx];
     const child = landmarks[childIdx];
-
     if (!child || child.visibility < 0.5) {
       if (parent && lastLandmarks[childIdx]) {
-        // estimate child position using last frame vector
         const dx = lastLandmarks[childIdx].x - lastLandmarks[parentIdx].x;
         const dy = lastLandmarks[childIdx].y - lastLandmarks[parentIdx].y;
         landmarks[childIdx] = {
@@ -174,13 +173,24 @@ function drawPredictiveLandmarks(results) {
           y: parent.y + dy,
           visibility: 0.5
         };
+      } else if (parent) {
+        // use default proportion if no last frame
+        let proportion = defaultProportions.upperArm;
+        if ([13,14,25,26].includes(childIdx)) proportion = defaultProportions.lowerArm;
+        if ([25,26,27,28].includes(childIdx)) proportion = defaultProportions.lowerLeg;
+        landmarks[childIdx] = {
+          x: parent.x + proportion * 0.2, // small estimate
+          y: parent.y + proportion * 0.2,
+          visibility: 0.5
+        };
       }
     }
   });
 
+  // 3. Store landmarks for next frame
   lastLandmarks = landmarks;
 
-  // Step 3: Draw yellow points
+  // 4. Draw yellow landmarks
   landmarks.forEach(lm => {
     const x = lm.x * canvas.width;
     const y = lm.y * canvas.height;
