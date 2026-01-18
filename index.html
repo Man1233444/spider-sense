@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Throw Predictor</title>
+<title>AR Throw Predictor – Fixed Start</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -16,12 +16,21 @@ html, body {
   overflow:hidden;
 }
 
+#camera-container {
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  z-index:0;
+}
+
 video, canvas {
   position:absolute;
   top:0;
   left:0;
-  width:100vw;
-  height:100vh;
+  width:100%;
+  height:100%;
   object-fit:cover;
   pointer-events:none;
 }
@@ -40,6 +49,7 @@ video, canvas {
   font-size:36px;
   z-index:9999;
   cursor:pointer;
+  pointer-events:auto;
 }
 
 #debug {
@@ -54,8 +64,11 @@ video, canvas {
 </head>
 <body>
 
-<video id="video" autoplay playsinline></video>
-<canvas id="canvas"></canvas>
+<div id="camera-container">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+
 <div id="debug">Initializing…</div>
 <div id="start">TAP TO START</div>
 
@@ -75,6 +88,7 @@ let handVelocity = {x:0,y:0,z:0};
 let lastTimestamp = null;
 
 startBtn.addEventListener("click", async () => {
+  // Fullscreen
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
   }
@@ -104,7 +118,6 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Main hand tracking + trajectory ---
 function drawHandPredictor(results){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
@@ -112,11 +125,10 @@ function drawHandPredictor(results){
 
   debug.textContent="Tracking hand…";
 
-  // Use right hand (landmark 16 = wrist)
+  // Right hand (landmark 16 = wrist)
   const hand = results.poseLandmarks[16];
   const timestamp = performance.now()/1000;
 
-  // Calculate velocity vector
   if(lastHand && lastTimestamp){
     const dt = timestamp - lastTimestamp;
     handVelocity.x = (hand.x - lastHand.x)/dt;
@@ -135,21 +147,20 @@ function drawHandPredictor(results){
   ctx.fillStyle="red";
   ctx.fill();
 
-  // Predict trajectory points (simple linear with gravity)
+  // Predicted trajectory
   const points = [];
   let px = hand.x, py = hand.y, pz = hand.z;
-  let vx = handVelocity.x*0.05; // scale to canvas
+  let vx = handVelocity.x*0.05;
   let vy = handVelocity.y*0.05;
-  const g = 0.0015; // gravity effect per frame
+  const g = 0.0015;
 
   for(let i=0;i<60;i++){
     px += vx;
     py += vy;
-    vy += g; // gravity
+    vy += g;
     points.push({x:px*canvas.width, y:py*canvas.height});
   }
 
-  // Draw predicted trajectory
   ctx.beginPath();
   for(let i=0;i<points.length;i++){
     const p = points[i];
