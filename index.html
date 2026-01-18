@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>AR Hand Aim</title>
 
-<!-- MediaPipe Hands -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -59,11 +58,10 @@ start.addEventListener("click", async () => {
     await document.documentElement.requestFullscreen();
   }
   start.style.display = "none";
-  startCamera();
+  startHandTracking();
 });
 
-// Start camera + MediaPipe
-function startCamera() {
+function startHandTracking() {
   const hands = new Hands({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
@@ -81,7 +79,6 @@ function startCamera() {
     onFrame: async () => {
       await hands.send({ image: video });
     },
-    facingMode: "environment",
     width: 1280,
     height: 720
   });
@@ -89,17 +86,25 @@ function startCamera() {
   camera.start();
 }
 
-// Draw AR aim line
 function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    ctx.fillStyle = "red";
+    ctx.font = "24px sans-serif";
+    ctx.fillText("NO HAND DETECTED", 20, 40);
+    return;
+  }
 
-  const hand = results.multiHandLandmarks[0];
+  const landmarks = results.multiHandLandmarks[0];
 
-  // Index finger base & tip
-  const base = hand[5];
-  const tip = hand[8];
+  // Draw hand skeleton (DEBUG)
+  drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: "cyan", lineWidth: 3 });
+  drawLandmarks(ctx, landmarks, { color: "yellow", radius: 4 });
+
+  // Aim using index finger
+  const base = landmarks[5];
+  const tip = landmarks[8];
 
   const startX = base.x * canvas.width;
   const startY = base.y * canvas.height;
@@ -110,37 +115,22 @@ function onResults(results) {
   let x = startX;
   let y = startY;
 
-  let vx = dx * 1500;
-  let vy = dy * 1500;
-
-  let bounced = false;
+  let vx = dx * 1200;
+  let vy = dy * 1200;
 
   ctx.beginPath();
   ctx.moveTo(x, y);
 
-  for (let i = 0; i < 60; i++) {
-    vy += 30; // gravity
+  for (let i = 0; i < 50; i++) {
+    vy += 25;
     x += vx * 0.02;
     y += vy * 0.02;
-
-    // ground bounce
-    if (!bounced && y > canvas.height * 0.9) {
-      vy *= -0.6;
-      bounced = true;
-    }
-
     ctx.lineTo(x, y);
   }
 
   ctx.strokeStyle = "lime";
   ctx.lineWidth = 4;
   ctx.stroke();
-
-  // finger point
-  ctx.beginPath();
-  ctx.arc(startX, startY, 6, 0, Math.PI * 2);
-  ctx.fillStyle = "red";
-  ctx.fill();
 }
 </script>
 
