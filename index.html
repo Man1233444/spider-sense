@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Body-Aware Aim</title>
+<title>Body Tracking AR</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -29,6 +29,13 @@ html, body {
   z-index: 10;
 }
 
+video, canvas {
+  position: absolute;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+}
+
 #debug {
   position: fixed;
   top: 10px;
@@ -36,13 +43,6 @@ html, body {
   color: lime;
   font-size: 16px;
   z-index: 20;
-}
-
-video, canvas {
-  position: absolute;
-  width: 100vw;
-  height: 100vh;
-  object-fit: cover;
 }
 </style>
 </head>
@@ -63,9 +63,6 @@ const ctx = canvas.getContext("2d");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let prevHand = null; // previous hand position for speed
-let prevShoulder = null; // for rotation smoothing
-
 start.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
@@ -74,7 +71,7 @@ start.addEventListener("click", async () => {
   await startBackCamera();
 });
 
-// === Back Camera ===
+// --- Start back camera reliably ---
 async function startBackCamera() {
   debug.textContent = "Looking for back camera…";
 
@@ -107,7 +104,7 @@ async function startBackCamera() {
     minTrackingConfidence: 0.7
   });
 
-  pose.onResults(onResults);
+  pose.onResults(drawPose);
 
   async function loop() {
     await pose.send({ image: video });
@@ -117,78 +114,22 @@ async function startBackCamera() {
   loop();
 }
 
-// === Draw trajectory based on hand & body ===
-function onResults(results) {
+// --- Draw only body landmarks ---
+function drawPose(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.poseLandmarks) {
     debug.textContent = "No body detected";
-    prevHand = null;
-    prevShoulder = null;
     return;
   }
 
   debug.textContent = "Body detected";
 
-  const landmarks = results.poseLandmarks;
+  // Draw skeleton
+  drawConnectors(ctx, results.poseLandmarks, Pose.POSE_CONNECTIONS, { color: "cyan", lineWidth: 4 });
 
-  drawConnectors(ctx, landmarks, Pose.POSE_CONNECTIONS, { color: "cyan", lineWidth: 3 });
-  drawLandmarks(ctx, landmarks, { color: "yellow", radius: 4 });
-
-  // Use Right Shoulder (12), Right Elbow (14), Right Wrist (16) for aim
-  const shoulder = landmarks[12];
-  const elbow = landmarks[14];
-  const wrist = landmarks[16];
-
-  const startX = elbow.x * canvas.width;
-  const startY = elbow.y * canvas.height;
-
-  // Velocity based on wrist movement
-  let speed = 0.1;
-  if(prevHand) {
-    const dx = (wrist.x - prevHand.x) * canvas.width;
-    const dy = (wrist.y - prevHand.y) * canvas.height;
-    speed = Math.sqrt(dx*dx + dy*dy);
-  }
-  prevHand = { x: wrist.x, y: wrist.y };
-
-  // 3D direction vector from elbow to wrist
-  const dxNorm = wrist.x - elbow.x;
-  const dyNorm = wrist.y - elbow.y;
-  const dzNorm = wrist.z - elbow.z;
-
-  const vecLength = Math.sqrt(dxNorm*dxNorm + dyNorm*dyNorm + dzNorm*dzNorm);
-  if(vecLength === 0) return;
-
-  const nx = dxNorm / vecLength;
-  const ny = dyNorm / vecLength;
-  const nz = dzNorm / vecLength;
-
-  // Line length scales with speed
-  const lineScale = Math.min(Math.max(speed * 20, 100), 600);
-
-  let x = startX;
-  let y = startY;
-  let vx = nx * lineScale;
-  let vy = ny * lineScale;
-
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-
-  for (let i = 0; i < 100; i++) {
-    vy += 28; // gravity
-    x += vx * 0.02;
-    y += vy * 0.02;
-
-    if(y > canvas.height * 0.9) vy *= -0.6; // bounce
-    if(x < 0 || x > canvas.width || y > canvas.height) break;
-
-    ctx.lineTo(x, y);
-  }
-
-  ctx.strokeStyle = "lime";
-  ctx.lineWidth = 4;
-  ctx.stroke();
+  // Draw landmarks
+  drawLandmarks(ctx, results.poseLandmarks, { color: "yellow", radius: 5 });
 }
 </script>
 
