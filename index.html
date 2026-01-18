@@ -2,13 +2,19 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Aim Trainer</title>
+<title>AR Hand Aim</title>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
 <style>
 html, body {
   margin: 0;
   padding: 0;
-  overflow: hidden;
   background: black;
+  overflow: hidden;
   width: 100%;
   height: 100%;
 }
@@ -36,14 +42,17 @@ video, canvas {
 <body>
 
 <div id="start">TAP TO START</div>
-<video id="camera" autoplay playsinline></video>
-<canvas id="overlay"></canvas>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
 
 <script>
 const start = document.getElementById("start");
-const video = document.getElementById("camera");
-const canvas = document.getElementById("overlay");
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
 start.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
@@ -53,55 +62,68 @@ start.addEventListener("click", async () => {
   startCamera();
 });
 
+// Start camera + MediaPipe
 function startCamera() {
-  navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { exact: "environment" } }
-  })
-  .then(stream => {
-    video.srcObject = stream;
-    resize();
-    requestAnimationFrame(draw);
+  const hands = new Hands({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(onResults);
+
+  const camera = new Camera(video, {
+    onFrame: async () => {
+      await hands.send({ image: video });
+    },
+    facingMode: "environment",
+    width: 1280,
+    height: 720
+  });
+
+  camera.start();
 }
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-window.addEventListener("resize", resize);
-
-// AIM ANGLE (centered)
-let angle = -Math.PI / 4; // 45 degrees up
-let power = 800;
-
-window.addEventListener("deviceorientation", e => {
-  if (e.beta !== null) {
-    angle = -((e.beta - 45) * Math.PI) / 180;
-  }
-});
-
-function draw() {
+// Draw AR aim line
+function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const startX = canvas.width / 2;
-  const startY = canvas.height * 0.85;
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
 
-  let vx = Math.cos(angle) * power;
-  let vy = Math.sin(angle) * power;
+  const hand = results.multiHandLandmarks[0];
+
+  // Index finger base & tip
+  const base = hand[5];
+  const tip = hand[8];
+
+  const startX = base.x * canvas.width;
+  const startY = base.y * canvas.height;
+
+  const dx = (tip.x - base.x);
+  const dy = (tip.y - base.y);
 
   let x = startX;
   let y = startY;
+
+  let vx = dx * 1500;
+  let vy = dy * 1500;
+
   let bounced = false;
 
   ctx.beginPath();
   ctx.moveTo(x, y);
 
-  for (let t = 0; t < 2; t += 0.02) {
-    vy += 9.8 * 30 * 0.02; // gravity
+  for (let i = 0; i < 60; i++) {
+    vy += 30; // gravity
     x += vx * 0.02;
     y += vy * 0.02;
 
-    // bounce
+    // ground bounce
     if (!bounced && y > canvas.height * 0.9) {
       vy *= -0.6;
       bounced = true;
@@ -114,13 +136,11 @@ function draw() {
   ctx.lineWidth = 4;
   ctx.stroke();
 
-  // aiming dot
+  // finger point
   ctx.beginPath();
   ctx.arc(startX, startY, 6, 0, Math.PI * 2);
   ctx.fillStyle = "red";
   ctx.fill();
-
-  requestAnimationFrame(draw);
 }
 </script>
 
