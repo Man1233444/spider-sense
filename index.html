@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Back-Camera Hand Aim</title>
+<title>Hand Aim – Back Camera</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -29,13 +29,6 @@ html, body {
   z-index: 10;
 }
 
-video, canvas {
-  position: absolute;
-  width: 100vw;
-  height: 100vh;
-  object-fit: cover;
-}
-
 #debug {
   position: fixed;
   top: 10px;
@@ -43,6 +36,13 @@ video, canvas {
   color: lime;
   font-size: 16px;
   z-index: 20;
+}
+
+video, canvas {
+  position: absolute;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
 }
 </style>
 </head>
@@ -55,10 +55,10 @@ video, canvas {
 
 <script>
 const start = document.getElementById("start");
+const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const debug = document.getElementById("debug");
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
@@ -68,26 +68,29 @@ start.addEventListener("click", async () => {
     await document.documentElement.requestFullscreen();
   }
   start.style.display = "none";
-  startBackCamera();
+  await startBackCamera();
 });
 
-// === BACK CAMERA SETUP (from old Spider Sense code) ===
 async function startBackCamera() {
-  debug.textContent = "Requesting back camera…";
+  debug.textContent = "Looking for back camera…";
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const backCamera = devices.find(d => d.kind === "videoinput" && d.label.toLowerCase().includes("back"));
+
+  if (!backCamera) {
+    debug.textContent = "No back camera found!";
+    return;
+  }
+
+  debug.textContent = `Back camera found: ${backCamera.label}`;
 
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { exact: "environment" },
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    },
+    video: { deviceId: { exact: backCamera.deviceId }, width: 1280, height: 720 },
     audio: false
   });
 
   video.srcObject = stream;
-  debug.textContent = "Back camera active";
 
-  // === Hand tracking setup ===
   const hands = new Hands({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
@@ -109,7 +112,7 @@ async function startBackCamera() {
   loop();
 }
 
-// === Draw hand + aiming line ===
+// === Hand drawing + aim line ===
 function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -122,17 +125,9 @@ function onResults(results) {
 
   const landmarks = results.multiHandLandmarks[0];
 
-  // Draw hand for debug
-  drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
-    color: "cyan",
-    lineWidth: 3
-  });
-  drawLandmarks(ctx, landmarks, {
-    color: "yellow",
-    radius: 4
-  });
+  drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: "cyan", lineWidth: 3 });
+  drawLandmarks(ctx, landmarks, { color: "yellow", radius: 4 });
 
-  // Aim line from index finger
   const base = landmarks[5]; // index finger base
   const tip = landmarks[8];  // index finger tip
 
@@ -144,7 +139,6 @@ function onResults(results) {
 
   let x = startX;
   let y = startY;
-
   let vx = dx * 1400;
   let vy = dy * 1400;
 
@@ -152,7 +146,7 @@ function onResults(results) {
   ctx.moveTo(x, y);
 
   for (let i = 0; i < 50; i++) {
-    vy += 28; // gravity
+    vy += 28;
     x += vx * 0.02;
     y += vy * 0.02;
     ctx.lineTo(x, y);
