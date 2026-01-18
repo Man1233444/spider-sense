@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Full AR Skeleton with Start</title>
+<title>AR Predictive Throw</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/examples/js/controls/OrbitControls.js"></script>
 
 <style>
-html, body { margin:0; padding:0; width:100%; height:100%; background:black; overflow:hidden;}
-video { position:absolute; top:0; left:0; width:100vw; height:100vh; object-fit:cover; pointer-events:none;}
-canvas { position:absolute; top:0; left:0;}
-#start { position:fixed; top:0; left:0; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center; background:black; color:white; font-size:36px; z-index:9999; cursor:pointer;}
-#debug { position:fixed; top:10px; left:10px; color:lime; font-size:16px; z-index:10;}
+html, body {margin:0;padding:0;width:100%;height:100%;background:black;overflow:hidden;}
+video {position:absolute;top:0;left:0;width:100vw;height:100vh;object-fit:cover;pointer-events:none;}
+canvas {position:absolute;top:0;left:0;}
+#start {position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;background:black;color:white;font-size:36px;z-index:9999;cursor:pointer;}
+#debug {position:fixed;top:10px;left:10px;color:lime;font-size:16px;z-index:10;}
 </style>
 </head>
 <body>
@@ -23,141 +23,126 @@ canvas { position:absolute; top:0; left:0;}
 <div id="debug">Initializing...</div>
 
 <script>
-// --- HTML Elements ---
+// --- Elements ---
 const startBtn = document.getElementById("start");
 const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 
 // --- Three.js Scene ---
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ alpha:true });
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight,0.1,1000);
+const renderer = new THREE.WebGLRenderer({alpha:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// Light
 const light = new THREE.DirectionalLight(0xffffff,1);
 light.position.set(0,10,10);
 scene.add(light);
 
-// Orbit controls (optional for debugging)
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
+const controls = new THREE.OrbitControls(camera,renderer.domElement);
 camera.position.set(0,1.5,3);
 controls.update();
 
-// --- Virtual Skeleton ---
-const joints = [];
-const bones = [];
-const jointGeo = new THREE.SphereGeometry(0.05,8,8);
+// --- Hand Joint Spheres ---
+const jointGeo = new THREE.SphereGeometry(0.03,8,8);
 const jointMat = new THREE.MeshStandardMaterial({color:0xffff00});
-for(let i=0;i<33;i++){
+const joints = [];
+for(let i=0;i<21;i++){
   const joint = new THREE.Mesh(jointGeo,jointMat);
   scene.add(joint);
   joints.push(joint);
 }
 
-const bonesIndices = [
-  [0,1],[1,2],[2,3],[0,4],[4,5],[5,6],
-  [11,13],[13,15],[12,14],[14,16],
-  [11,23],[23,25],[25,27],[12,24],[24,26],[26,28]
-];
-bonesIndices.forEach(([p,c])=>{
-  const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
-  const line = new THREE.Line(geom,new THREE.LineBasicMaterial({color:0xffff00}));
-  scene.add(line);
-  bones.push({line,p,c});
-});
+// --- Trajectory Prediction Line ---
+let trajectoryLine;
+const trajMat = new THREE.LineBasicMaterial({color:0x00ff00,linewidth:2});
+const trajGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3()]);
+trajectoryLine = new THREE.Line(trajGeom,trajMat);
+scene.add(trajectoryLine);
 
-// --- MediaPipe Pose ---
-let pose = null;
-let lastLandmarks = [];
+// --- Hand Tracking ---
+let hands = null;
+let lastPositions = [];
 
-// --- Start Button Handler ---
-startBtn.addEventListener("click", async () => {
-  // Hide Start button immediately
-  startBtn.style.display = "none";
-
-  // Go fullscreen
-  if (document.documentElement.requestFullscreen) {
+startBtn.addEventListener("click", async()=>{
+  startBtn.style.display="none";
+  if(document.documentElement.requestFullscreen){
     await document.documentElement.requestFullscreen();
   }
 
-  debug.textContent = "Starting camera...";
-
-  // Start back camera
+  debug.textContent="Starting back camera...";
   const devices = await navigator.mediaDevices.enumerateDevices();
-  const backCam = devices.find(d => d.kind === "videoinput" && d.label.toLowerCase().includes("back"));
-  if (!backCam) {
-    debug.textContent = "No back camera found!";
-    return;
-  }
-
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { deviceId: { exact: backCam.deviceId }, width: 1280, height: 720 },
-    audio: false
-  });
+  const backCam = devices.find(d=>d.kind==="videoinput" && d.label.toLowerCase().includes("back"));
+  if(!backCam){debug.textContent="No back camera!"; return;}
+  const stream = await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:backCam.deviceId},width:1280,height:720},audio:false});
   video.srcObject = stream;
+  debug.textContent="Camera started.";
 
-  debug.textContent = `Back camera started: ${backCam.label}`;
+  hands = new Hands({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+  hands.setOptions({maxNumHands:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+  hands.onResults(updateHand);
 
-  // Initialize MediaPipe Pose
-  pose = new Pose({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
-  pose.setOptions({
-    modelComplexity: 1,
-    smoothLandmarks: true,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5
-  });
-
-  pose.onResults(updateSkeleton);
-
-  // Start processing loop
-  async function loop() {
-    if (video.readyState >= 2) {
-      await pose.send({ image: video });
+  async function loop(){
+    if(video.readyState>=2){
+      await hands.send({image:video});
     }
     requestAnimationFrame(loop);
   }
   loop();
-
-  debug.textContent = "Tracking started!";
+  debug.textContent="Hand tracking started!";
 });
 
-// --- Update Skeleton ---
-function updateSkeleton(results){
-  if(!results.poseLandmarks) return;
+// --- Predictive Trajectory Function ---
+function predictTrajectory(positions){
+  if(positions.length<2) return null;
+  const last = positions[positions.length-1];
+  const prev = positions[positions.length-2];
 
-  results.poseLandmarks.forEach((l,i)=>{
-    if(l.visibility < 0.5 && lastLandmarks[i]){
-      // interpolate
-      lastLandmarks[i] = {
-        x: lastLandmarks[i].x*0.8 + l.x*0.2,
-        y: lastLandmarks[i].y*0.8 + l.y*0.2,
-        z: lastLandmarks[i].z*0.8 + (l.z||0)*0.2
-      };
-    } else {
-      lastLandmarks[i] = l;
-    }
-  });
+  const vx = last.x - prev.x;
+  const vy = last.y - prev.y;
+  const vz = last.z - prev.z;
 
-  // Map to Three.js
-  lastLandmarks.forEach((l,i)=>{
-    const x = (l.x-0.5)*2;
-    const y = -(l.y-0.5)*2;
+  const points = [];
+  let tStep = 0.05;
+  let g = -9.8;
+  let posX = last.x, posY = last.y, posZ = last.z;
+  let velX = vx*5, velY = vy*5, velZ = vz*5; // scale for AR units
+
+  for(let t=0;t<0.5;t+=tStep){
+    posX += velX*tStep;
+    posY += velY*tStep + 0.5*g*tStep*tStep;
+    velY += g*tStep;
+    posZ += velZ*tStep;
+    points.push(new THREE.Vector3(posX,posY,posZ));
+  }
+  return points;
+}
+
+// --- Update Hand & Trajectory ---
+function updateHand(results){
+  if(!results.multiHandLandmarks || results.multiHandLandmarks.length==0) return;
+  const lm = results.multiHandLandmarks[0];
+
+  lastPositions.push({x:lm[9].x-0.5,y:-(lm[9].y-0.5),z:-(lm[9].z||0)}); // use middle finger base as throw origin
+  if(lastPositions.length>5) lastPositions.shift();
+
+  // Update joint positions
+  lm.forEach((l,i)=>{
+    const x = l.x-0.5;
+    const y = -(l.y-0.5);
     const z = -(l.z||0);
     joints[i].position.set(x,y,z);
   });
 
-  // Update bones
-  bones.forEach(b=>{
-    const p = joints[b.p].position;
-    const c = joints[b.c].position;
-    b.line.geometry.setFromPoints([p.clone(),c.clone()]);
-    b.line.geometry.attributes.position.needsUpdate = true;
-  });
+  // Predict trajectory
+  const trajPoints = predictTrajectory(lastPositions);
+  if(trajPoints){
+    trajectoryLine.geometry.setFromPoints(trajPoints);
+    trajectoryLine.geometry.attributes.position.needsUpdate=true;
+  }
 }
 
-// --- Render Loop ---
+// --- Render ---
 function animate(){
   requestAnimationFrame(animate);
   renderer.render(scene,camera);
@@ -168,3 +153,4 @@ animate();
 
 </body>
 </html>
+
