@@ -137,20 +137,39 @@ function onResults(results) {
   const dx = tip.x - base.x;
   const dy = tip.y - base.y;
 
-  let x = startX;
-  let y = startY;
-  let vx = dx * 1400;
-  let vy = dy * 1400;
+ // Calculate normalized direction for index finger
+const dxNorm = (tip.x - base.x) * canvas.width;
+const dyNorm = (tip.y - base.y) * canvas.height;
+const length = Math.sqrt(dxNorm*dxNorm + dyNorm*dyNorm);
+if(length === 0) return;
 
-  ctx.beginPath();
-  ctx.moveTo(x, y);
+const nx = dxNorm / length;
+const ny = dyNorm / length;
 
-  for (let i = 0; i < 50; i++) {
-    vy += 28;
-    x += vx * 0.02;
-    y += vy * 0.02;
-    ctx.lineTo(x, y);
+// Aim line physics
+let x = startX;
+let y = startY;
+let vx = nx * 300; // initial velocity scaled
+let vy = ny * 300;
+
+ctx.beginPath();
+ctx.moveTo(x, y);
+
+for (let i = 0; i < 50; i++) {
+  vy += 28; // gravity
+  x += vx * 0.02;
+  y += vy * 0.02;
+
+  // bounce off bottom
+  if(y > canvas.height * 0.9) {
+    vy *= -0.6;
   }
+
+  ctx.lineTo(x, y);
+}
+ctx.strokeStyle = "lime";
+ctx.lineWidth = 4;
+ctx.stroke();
 
   ctx.strokeStyle = "lime";
   ctx.lineWidth = 4;
