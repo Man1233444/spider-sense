@@ -8,11 +8,25 @@ html, body {
   margin: 0;
   padding: 0;
   background: black;
-  overflow: hidden;
   width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
+/* START OVERLAY */
+#start {
+  position: fixed;
+  inset: 0;
+  background: black;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  z-index: 10;
+}
+
+/* VR LAYOUT */
 #container {
   display: flex;
   width: 100vw;
@@ -20,12 +34,12 @@ html, body {
 }
 
 .eye {
-  width: 45vw;
+  width: 40vw;       /* narrower eyes */
   height: 100vh;
 }
 
 #gap {
-  width: 10vw; /* MIDDLE SPACE FOR VR */
+  width: 20vw;       /* BIG CENTER GAP */
   background: black;
 }
 
@@ -38,6 +52,8 @@ video {
 </head>
 <body>
 
+<div id="start">TAP TO START</div>
+
 <div id="container">
   <video id="left" class="eye" autoplay playsinline></video>
   <div id="gap"></div>
@@ -45,25 +61,29 @@ video {
 </div>
 
 <script>
-// FULLSCREEN ON TAP
-document.body.addEventListener("click", () => {
-  if (document.documentElement.requestFullscreen) {
-    document.documentElement.requestFullscreen();
-  }
-}, { once: true });
-
+const start = document.getElementById("start");
 const left = document.getElementById("left");
 const right = document.getElementById("right");
 
-// BACK CAMERA
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: { exact: "environment" } }
-})
-.then(stream => {
-  left.srcObject = stream;
-  right.srcObject = stream;
-  startDetection();
+start.addEventListener("click", async () => {
+  // FULLSCREEN (guaranteed user gesture)
+  if (document.documentElement.requestFullscreen) {
+    await document.documentElement.requestFullscreen();
+  }
+  start.style.display = "none";
+  startCamera();
 });
+
+function startCamera() {
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { exact: "environment" } }
+  })
+  .then(stream => {
+    left.srcObject = stream;
+    right.srcObject = stream;
+    startDetection();
+  });
+}
 
 let lastFrame = null;
 
@@ -83,17 +103,16 @@ function startDetection() {
     if (lastFrame) {
       let diff = 0;
 
-      // Sample pixels
       for (let i = 0; i < frame.data.length; i += 40) {
         diff += Math.abs(frame.data[i] - lastFrame.data[i]);
       }
 
-      if (diff > 800000) {
-        let strength = Math.min(Math.floor((diff - 800000) / 400000), 6);
+      if (diff > 700000) {
+        let strength = Math.min(Math.floor((diff - 700000) / 300000), 8);
         let pattern = [];
 
         for (let i = 0; i < strength; i++) {
-          pattern.push(120, 60);
+          pattern.push(150, 60);
         }
 
         navigator.vibrate(pattern);
