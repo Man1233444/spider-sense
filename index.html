@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Body Tracking AR</title>
+<title>Body Tracking AR – Clean</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -17,16 +17,16 @@ html, body {
   height: 100%;
 }
 
-#start {
+#loading {
   position: fixed;
   inset: 0;
   background: black;
   color: white;
-  font-size: 32px;
+  font-size: 36px;
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 10;
+  align-items: center;
+  z-index: 20;
 }
 
 video, canvas {
@@ -42,19 +42,19 @@ video, canvas {
   left: 10px;
   color: lime;
   font-size: 16px;
-  z-index: 20;
+  z-index: 10;
 }
 </style>
 </head>
 <body>
 
-<div id="start">TAP TO START</div>
-<div id="debug">Initializing…</div>
+<div id="loading">Loading camera…</div>
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
+<div id="debug">Initializing…</div>
 
 <script>
-const start = document.getElementById("start");
+const loading = document.getElementById("loading");
 const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
@@ -63,15 +63,9 @@ const ctx = canvas.getContext("2d");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-start.addEventListener("click", async () => {
-  if (document.documentElement.requestFullscreen) {
-    await document.documentElement.requestFullscreen();
-  }
-  start.style.display = "none";
-  await startBackCamera();
-});
+let pose = null;
 
-// --- Back camera setup ---
+// --- Start back camera ---
 async function startBackCamera() {
   debug.textContent = "Looking for back camera…";
 
@@ -80,6 +74,7 @@ async function startBackCamera() {
 
   if (!backCamera) {
     debug.textContent = "No back camera found!";
+    loading.textContent = "No back camera found!";
     return;
   }
 
@@ -92,8 +87,12 @@ async function startBackCamera() {
 
   video.srcObject = stream;
 
+  video.onloadedmetadata = () => {
+    loading.style.display = "none"; // hide loading when video is ready
+  };
+
   // --- MediaPipe Pose ---
-  const pose = new Pose({
+  pose = new Pose({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
   });
 
@@ -107,7 +106,9 @@ async function startBackCamera() {
   pose.onResults(drawLandmarksOnly);
 
   async function loop() {
-    await pose.send({ image: video });
+    if(video.readyState >= 2) {
+      await pose.send({ image: video });
+    }
     requestAnimationFrame(loop);
   }
 
@@ -125,9 +126,19 @@ function drawLandmarksOnly(results) {
 
   debug.textContent = "Body detected";
 
-  // Draw only points (joints)
-  drawLandmarks(ctx, results.poseLandmarks, { color: "yellow", radius: 5 });
+  // Draw only points/joints (yellow circles)
+  for (const lm of results.poseLandmarks) {
+    const x = lm.x * canvas.width;
+    const y = lm.y * canvas.height;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = "yellow";
+    ctx.fill();
+  }
 }
+
+// --- Initialize ---
+startBackCamera();
 </script>
 
 </body>
