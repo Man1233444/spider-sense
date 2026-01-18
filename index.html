@@ -71,7 +71,7 @@ start.addEventListener("click", async () => {
   await startBackCamera();
 });
 
-// --- Start back camera reliably ---
+// --- Back camera setup ---
 async function startBackCamera() {
   debug.textContent = "Looking for back camera…";
 
@@ -104,7 +104,7 @@ async function startBackCamera() {
     minTrackingConfidence: 0.7
   });
 
-  pose.onResults(drawPose);
+  pose.onResults(drawLandmarksOnly);
 
   async function loop() {
     await pose.send({ image: video });
@@ -114,8 +114,8 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Draw only body landmarks ---
-function drawPose(results) {
+// --- Draw only landmarks, no lines ---
+function drawLandmarksOnly(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.poseLandmarks) {
@@ -125,10 +125,7 @@ function drawPose(results) {
 
   debug.textContent = "Body detected";
 
-  // Draw skeleton
-  drawConnectors(ctx, results.poseLandmarks, Pose.POSE_CONNECTIONS, { color: "cyan", lineWidth: 4 });
-
-  // Draw landmarks
+  // Draw only points (joints)
   drawLandmarks(ctx, results.poseLandmarks, { color: "yellow", radius: 5 });
 }
 </script>
