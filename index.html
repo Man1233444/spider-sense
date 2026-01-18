@@ -2,64 +2,48 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Hands Only Line AR</title>
+<title>Wrist Ray AR</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
 <style>
 html, body {
-  margin:0;
-  padding:0;
-  width:100%;
-  height:100%;
-  background:black;
-  overflow:hidden;
-}
-
-#camera-container {
-  position:absolute;
-  top:0;
-  left:0;
-  width:100%;
-  height:100%;
-  z-index:0;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: black;
+  overflow: hidden;
 }
 
 video, canvas {
-  position:absolute;
-  top:0;
-  left:0;
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  pointer-events:none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  pointer-events: none;
 }
 
 #start {
-  position:fixed;
-  top:0;
-  left:0;
-  width:100vw;
-  height:100vh;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  background:black;
-  color:white;
-  font-size:36px;
-  z-index:9999;
-  cursor:pointer;
-  pointer-events:auto;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: black;
+  color: white;
+  font-size: 36px;
+  z-index: 9999;
+  cursor: pointer;
 }
 </style>
 </head>
 <body>
 
-<div id="camera-container">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
-</div>
-
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
 <div id="start">TAP TO START</div>
 
 <script>
@@ -68,78 +52,93 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+canvas.width = innerWidth;
+canvas.height = innerHeight;
 
-let pose = null;
+let pose;
 
-// --- Start button ---
-startBtn.addEventListener("click", async () => {
-  if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
-  startBtn.style.display = "none";
-  await startBackCamera();
-});
+// START
+startBtn.onclick = async () => {
+  await document.documentElement.requestFullscreen?.();
+  startBtn.remove();
+  startCamera();
+};
 
-// --- Back camera only ---
-async function startBackCamera() {
+async function startCamera() {
   const devices = await navigator.mediaDevices.enumerateDevices();
-  const backCamera = devices.find(d => d.kind === "videoinput" && d.label.toLowerCase().includes("back"));
-  if(!backCamera){ alert("No back camera found!"); return; }
+  const backCam = devices.find(d =>
+    d.kind === "videoinput" && d.label.toLowerCase().includes("back")
+  );
 
   const stream = await navigator.mediaDevices.getUserMedia({
-    video:{deviceId:{exact:backCamera.deviceId}, width:1280, height:720},
-    audio:false
+    video: backCam
+      ? { deviceId: { exact: backCam.deviceId } }
+      : { facingMode: "environment" },
+    audio: false
   });
+
   video.srcObject = stream;
 
-  // --- MediaPipe Pose, only to get wrists ---
-  pose = new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
-  pose.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
-  pose.onResults(drawHandsLine);
+  pose = new Pose({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+  });
 
-  // --- Processing loop ---
-  async function loop(){
-    if(video.readyState>=2) await pose.send({image:video});
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  pose.onResults(drawRay);
+
+  const loop = async () => {
+    if (video.readyState >= 2) await pose.send({ image: video });
     requestAnimationFrame(loop);
-  }
+  };
   loop();
 }
 
-// --- Draw line and detect wall hits ---
-function drawHandsLine(results){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+// DRAW STRAIGHT RAY FROM WRIST
+function drawRay(results) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if(!results.poseLandmarks) return;
+  if (!results.poseLandmarks) return;
 
-  const leftWrist = results.poseLandmarks[15]; // left wrist
-  const rightWrist = results.poseLandmarks[16]; // right wrist
-  if(!leftWrist || !rightWrist) return;
+  // RIGHT WRIST ONLY
+  const wrist = results.poseLandmarks[16];
+  if (!wrist || wrist.visibility < 0.5) return;
 
-  const x1 = leftWrist.x * canvas.width;
-  const y1 = leftWrist.y * canvas.height;
-  const x2 = rightWrist.x * canvas.width;
-  const y2 = rightWrist.y * canvas.height;
+  const wx = wrist.x * canvas.width;
+  const wy = wrist.y * canvas.height;
 
-  // Draw line between wrists
+  // Direction: straight forward (upwards on screen)
+  const dx = 0;
+  const dy = -1;
+
+  // Find wall hit
+  let t = Infinity;
+  if (dy < 0) t = wy / -dy;
+  if (dy > 0) t = (canvas.height - wy) / dy;
+  if (dx < 0) t = Math.min(t, wx / -dx);
+  if (dx > 0) t = Math.min(t, (canvas.width - wx) / dx);
+
+  const hitX = wx + dx * t;
+  const hitY = wy + dy * t;
+
+  // Draw straight line
   ctx.beginPath();
-  ctx.moveTo(x1,y1);
-  ctx.lineTo(x2,y2);
+  ctx.moveTo(wx, wy);
+  ctx.lineTo(hitX, hitY);
   ctx.strokeStyle = "lime";
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4;
   ctx.stroke();
 
-  // Detect if wrists “hit” screen edges
-  const hits = [];
-  if(x1 <= 0 || x1 >= canvas.width || y1 <= 0 || y1 >= canvas.height) hits.push({x:x1,y:y1});
-  if(x2 <= 0 || x2 >= canvas.width || y2 <= 0 || y2 >= canvas.height) hits.push({x:x2,y:y2});
-
-  // Draw big red circles at hit points
-  hits.forEach(p=>{
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,50,0,Math.PI*2);
-    ctx.fillStyle="red";
-    ctx.fill();
-  });
+  // Draw wall hit
+  ctx.beginPath();
+  ctx.arc(hitX, hitY, 40, 0, Math.PI * 2);
+  ctx.fillStyle = "red";
+  ctx.fill();
 }
 </script>
 
