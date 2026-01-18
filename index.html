@@ -2,9 +2,8 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Hand Ray (Fixed)</title>
+<title>Hand Ray Tracker</title>
 
-<!-- REQUIRED MEDIAPIPE FILES -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
@@ -29,17 +28,18 @@ video, canvas {
   inset: 0;
   background: black;
   color: white;
-  font-size: 36px;
+  font-size: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  z-index: 999;
+  cursor: pointer;
 }
 </style>
 </head>
 <body>
 
-<video id="video" autoplay playsinline></video>
+<video id="video" playsinline autoplay></video>
 <canvas id="canvas"></canvas>
 <div id="start">TAP TO START</div>
 
@@ -47,18 +47,22 @@ video, canvas {
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const start = document.getElementById("start");
+const startBtn = document.getElementById("start");
 
-canvas.width = innerWidth;
-canvas.height = innerHeight;
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-start.onclick = async () => {
-  await document.documentElement.requestFullscreen?.();
-  start.remove();
-  startTracking();
-};
+// Smoothing for wrist position
+let smoothedWx = null;
+let smoothedWy = null;
 
-function startTracking() {
+startBtn.addEventListener("click", async () => {
+  startBtn.style.display = "none";
+  document.documentElement.requestFullscreen?.().catch(()=>{});
+  startHandTracker();
+});
+
+function startHandTracker() {
   const hands = new Hands({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
   });
@@ -66,55 +70,63 @@ function startTracking() {
   hands.setOptions({
     maxNumHands: 1,
     modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7
+    minDetectionConfidence: 0.8,
+    minTrackingConfidence: 0.8
   });
 
   hands.onResults(results => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!results.multiHandLandmarks) return;
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
 
     const hand = results.multiHandLandmarks[0];
-    const wrist = hand[0];
-    const mid = hand[9];
 
+    const wrist = hand[0];      // wrist
+    const indexBase = hand[5];  // index finger base
+
+    // Convert to canvas coordinates
     const wx = wrist.x * canvas.width;
     const wy = wrist.y * canvas.height;
+    const ix = indexBase.x * canvas.width;
+    const iy = indexBase.y * canvas.height;
 
-    let dx = mid.x - wrist.x;
-    let dy = mid.y - wrist.y;
+    // Simple smoothing
+    if (smoothedWx === null) smoothedWx = wx;
+    if (smoothedWy === null) smoothedWy = wy;
+    smoothedWx = smoothedWx * 0.7 + wx * 0.3;
+    smoothedWy = smoothedWy * 0.7 + wy * 0.3;
 
+    // Direction vector from wrist → index base
+    let dx = ix - smoothedWx;
+    let dy = iy - smoothedWy;
     const len = Math.hypot(dx, dy);
     if (len < 0.001) return;
-
     dx /= len;
     dy /= len;
 
-    const hitX = wx + dx * 2000;
-    const hitY = wy + dy * 2000;
+    // Draw a long green line (2000px) forward
+    const endX = smoothedWx + dx * 2000;
+    const endY = smoothedWy + dy * 2000;
 
-    // DRAW STRAIGHT LINE
     ctx.beginPath();
-    ctx.moveTo(wx, wy);
-    ctx.lineTo(hitX, hitY);
+    ctx.moveTo(smoothedWx, smoothedWy);
+    ctx.lineTo(endX, endY);
     ctx.strokeStyle = "lime";
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 6;
     ctx.stroke();
 
-    // RED IMPACT CIRCLE
+    // Draw a big circle at the wrist for tracking
     ctx.beginPath();
-    ctx.arc(hitX, hitY, 30, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
+    ctx.arc(smoothedWx, smoothedWy, 20, 0, Math.PI*2);
+    ctx.fillStyle = "lime";
     ctx.fill();
   });
 
   const camera = new Camera(video, {
-    onFrame: async () => {
-      await hands.send({ image: video });
-    },
+    facingMode: "environment",
     width: 1280,
-    height: 720
+    height: 720,
+    onFrame: async () => { await hands.send({ image: video }); }
   });
 
   camera.start();
