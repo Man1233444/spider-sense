@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Body Tracking AR – Working Start</title>
+<title>Body Tracking AR – Fullscreen Start Button</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -16,25 +16,18 @@ html, body {
   overflow: hidden;
 }
 
-/* Video + Canvas container */
-#camera-container {
+/* Video and canvas full screen */
+video, canvas {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-}
-
-video, canvas {
-  position: absolute;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   object-fit: cover;
-  pointer-events: none; /* let clicks pass through */
+  pointer-events: none; /* allow taps to go through to button */
 }
 
-/* Start button on top */
+/* Start button */
 #start {
   position: fixed;
   top: 0;
@@ -51,23 +44,6 @@ video, canvas {
   cursor: pointer;
 }
 
-/* Loading screen */
-#loading {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: black;
-  color: white;
-  font-size: 36px;
-  z-index: 9998;
-  display: none;
-}
-
 #debug {
   position: fixed;
   top: 10px;
@@ -80,18 +56,13 @@ video, canvas {
 </head>
 <body>
 
-<div id="camera-container">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
-</div>
-
-<div id="start">TAP TO START</div>
-<div id="loading">Loading camera…</div>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
 <div id="debug">Initializing…</div>
+<div id="start">TAP TO START</div>
 
 <script>
 const startBtn = document.getElementById("start");
-const loading = document.getElementById("loading");
 const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
@@ -102,15 +73,12 @@ canvas.height = window.innerHeight;
 
 let pose = null;
 
-// --- Start button click ---
 startBtn.addEventListener("click", async () => {
-  // Enter fullscreen
+  // Go full-screen
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
   }
-
   startBtn.style.display = "none"; // hide start button
-  loading.style.display = "flex";  // show loading screen
   await startBackCamera();
 });
 
@@ -123,7 +91,6 @@ async function startBackCamera() {
 
   if (!backCamera) {
     debug.textContent = "No back camera found!";
-    loading.textContent = "No back camera found!";
     return;
   }
 
@@ -136,11 +103,7 @@ async function startBackCamera() {
 
   video.srcObject = stream;
 
-  video.onloadedmetadata = () => {
-    loading.style.display = "none"; // hide loading screen when video is ready
-  };
-
-  // --- MediaPipe Pose ---
+  // --- Initialize MediaPipe Pose ---
   pose = new Pose({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
   });
@@ -154,6 +117,7 @@ async function startBackCamera() {
 
   pose.onResults(drawLandmarksOnly);
 
+  // Start the loop
   async function loop() {
     if(video.readyState >= 2) {
       await pose.send({ image: video });
@@ -164,7 +128,7 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Draw only landmarks ---
+// --- Draw only yellow landmarks, no green lines ---
 function drawLandmarksOnly(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -188,3 +152,4 @@ function drawLandmarksOnly(results) {
 
 </body>
 </html>
+
