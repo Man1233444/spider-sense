@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Body Tracking AR – Clean</title>
+<title>Body Tracking AR – Fullscreen Start</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -16,6 +16,19 @@ html, body {
   height: 100%;
 }
 
+#start {
+  position: fixed;
+  inset: 0;
+  background: black;
+  color: white;
+  font-size: 36px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 30;
+  cursor: pointer;
+}
+
 #loading {
   position: fixed;
   inset: 0;
@@ -26,6 +39,7 @@ html, body {
   justify-content: center;
   align-items: center;
   z-index: 20;
+  display: none;
 }
 
 video, canvas {
@@ -47,12 +61,14 @@ video, canvas {
 </head>
 <body>
 
+<div id="start">TAP TO START</div>
 <div id="loading">Loading camera…</div>
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
 <div id="debug">Initializing…</div>
 
 <script>
+const startBtn = document.getElementById("start");
 const loading = document.getElementById("loading");
 const debug = document.getElementById("debug");
 const video = document.getElementById("video");
@@ -63,6 +79,16 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 let pose = null;
+
+startBtn.addEventListener("click", async () => {
+  // Enter fullscreen
+  if (document.documentElement.requestFullscreen) {
+    await document.documentElement.requestFullscreen();
+  }
+  startBtn.style.display = "none"; // hide start button
+  loading.style.display = "flex";  // show loading screen
+  await startBackCamera();
+});
 
 // --- Start back camera ---
 async function startBackCamera() {
@@ -87,7 +113,7 @@ async function startBackCamera() {
   video.srcObject = stream;
 
   video.onloadedmetadata = () => {
-    loading.style.display = "none"; // hide loading when video is ready
+    loading.style.display = "none"; // hide loading screen when video is ready
   };
 
   // --- MediaPipe Pose ---
@@ -125,7 +151,7 @@ function drawLandmarksOnly(results) {
 
   debug.textContent = "Body detected";
 
-  // Draw only points (no lines)
+  // Draw only points/joints (yellow circles)
   results.poseLandmarks.forEach(lm => {
     const x = lm.x * canvas.width;
     const y = lm.y * canvas.height;
@@ -135,9 +161,6 @@ function drawLandmarksOnly(results) {
     ctx.fill();
   });
 }
-
-// --- Initialize ---
-startBackCamera();
 </script>
 
 </body>
