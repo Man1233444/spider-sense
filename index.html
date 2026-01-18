@@ -2,10 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Hand Aim (Back Camera)</title>
+<title>AR Hand Aim – Back Camera</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <style>
@@ -30,6 +29,15 @@ html, body {
   z-index: 10;
 }
 
+#debug {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  color: lime;
+  font-size: 16px;
+  z-index: 20;
+}
+
 video, canvas {
   position: absolute;
   width: 100vw;
@@ -41,6 +49,7 @@ video, canvas {
 <body>
 
 <div id="start">TAP TO START</div>
+<div id="debug">Initializing…</div>
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
 
@@ -49,6 +58,7 @@ const start = document.getElementById("start");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const debug = document.getElementById("debug");
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
@@ -58,10 +68,25 @@ start.addEventListener("click", async () => {
     await document.documentElement.requestFullscreen();
   }
   start.style.display = "none";
-  startHandTracking();
+  startBackCamera();
 });
 
-function startHandTracking() {
+async function startBackCamera() {
+  debug.textContent = "Requesting back camera…";
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { exact: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    },
+    audio: false
+  });
+
+  video.srcObject = stream;
+
+  debug.textContent = "Back camera active";
+
   const hands = new Hands({
     locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
@@ -75,31 +100,26 @@ function startHandTracking() {
 
   hands.onResults(onResults);
 
-  const camera = new Camera(video, {
-    onFrame: async () => {
-      await hands.send({ image: video });
-    },
-    facingMode: { exact: "environment" },
-    width: 1280,
-    height: 720
-  });
+  async function loop() {
+    await hands.send({ image: video });
+    requestAnimationFrame(loop);
+  }
 
-  camera.start();
+  loop();
 }
 
 function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-    ctx.fillStyle = "red";
-    ctx.font = "22px sans-serif";
-    ctx.fillText("SHOW HAND TO CAMERA", 20, 40);
+    debug.textContent = "Back camera active – NO HAND";
     return;
   }
 
+  debug.textContent = "Back camera active – HAND DETECTED";
+
   const landmarks = results.multiHandLandmarks[0];
 
-  // Draw hand (debug + confidence)
   drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
     color: "cyan",
     lineWidth: 3
@@ -109,7 +129,6 @@ function onResults(results) {
     radius: 4
   });
 
-  // Index finger aiming
   const base = landmarks[5];
   const tip = landmarks[8];
 
@@ -128,8 +147,8 @@ function onResults(results) {
   ctx.beginPath();
   ctx.moveTo(x, y);
 
-  for (let i = 0; i < 55; i++) {
-    vy += 28; // gravity
+  for (let i = 0; i < 50; i++) {
+    vy += 28;
     x += vx * 0.02;
     y += vy * 0.02;
     ctx.lineTo(x, y);
