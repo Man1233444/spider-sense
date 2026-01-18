@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Body Tracking AR – Robust Version</title>
+<title>Body Tracking AR – Predictive Limb Estimation</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -70,7 +70,21 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 let pose = null;
-let lastLandmarks = []; // store last frame for interpolation
+let lastLandmarks = [];
+
+// Limb connections for prediction (parent → child)
+const limbs = [
+  [11, 13], // left shoulder → left elbow
+  [13, 15], // left elbow → left wrist
+  [12, 14], // right shoulder → right elbow
+  [14, 16], // right elbow → right wrist
+  [23, 25], // left hip → left knee
+  [25, 27], // left knee → left ankle
+  [24, 26], // right hip → right knee
+  [26, 28], // right knee → right ankle
+  [11, 23], // left shoulder → left hip
+  [12, 24]  // right shoulder → right hip
+];
 
 startBtn.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
@@ -107,11 +121,11 @@ async function startBackCamera() {
   pose.setOptions({
     modelComplexity: 1,
     smoothLandmarks: true,
-    minDetectionConfidence: 0.5, // lower to detect partially visible people
+    minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
 
-  pose.onResults(drawRobustLandmarks);
+  pose.onResults(drawPredictiveLandmarks);
 
   async function loop() {
     if(video.readyState >= 2) {
@@ -123,8 +137,8 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Draw landmarks with robustness ---
-function drawRobustLandmarks(results) {
+// --- Draw landmarks with predictive limb estimation ---
+function drawPredictiveLandmarks(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.poseLandmarks) {
@@ -136,19 +150,37 @@ function drawRobustLandmarks(results) {
 
   const landmarks = [];
 
-  // interpolate missing landmarks using last frame
+  // Step 1: Copy landmarks or interpolate with last frame
   results.poseLandmarks.forEach((lm, i) => {
     if (lm.visibility < 0.5 && lastLandmarks[i]) {
-      // use last known position if current is unreliable
-      landmarks[i] = lastLandmarks[i];
+      landmarks[i] = lastLandmarks[i]; // fallback to previous frame
     } else {
       landmarks[i] = lm;
     }
   });
 
+  // Step 2: Predict missing child joints using limb vectors
+  limbs.forEach(([parentIdx, childIdx]) => {
+    const parent = landmarks[parentIdx];
+    const child = landmarks[childIdx];
+
+    if (!child || child.visibility < 0.5) {
+      if (parent && lastLandmarks[childIdx]) {
+        // estimate child position using last frame vector
+        const dx = lastLandmarks[childIdx].x - lastLandmarks[parentIdx].x;
+        const dy = lastLandmarks[childIdx].y - lastLandmarks[parentIdx].y;
+        landmarks[childIdx] = {
+          x: parent.x + dx,
+          y: parent.y + dy,
+          visibility: 0.5
+        };
+      }
+    }
+  });
+
   lastLandmarks = landmarks;
 
-  // draw landmarks
+  // Step 3: Draw yellow points
   landmarks.forEach(lm => {
     const x = lm.x * canvas.width;
     const y = lm.y * canvas.height;
