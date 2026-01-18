@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Hand Line AR</title>
+<title>Hands Only Line AR</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -73,14 +73,14 @@ canvas.height = window.innerHeight;
 
 let pose = null;
 
+// --- Start button ---
 startBtn.addEventListener("click", async () => {
-  if (document.documentElement.requestFullscreen) {
-    await document.documentElement.requestFullscreen();
-  }
+  if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
   startBtn.style.display = "none";
   await startBackCamera();
 });
 
+// --- Back camera only ---
 async function startBackCamera() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   const backCamera = devices.find(d => d.kind === "videoinput" && d.label.toLowerCase().includes("back"));
@@ -92,10 +92,12 @@ async function startBackCamera() {
   });
   video.srcObject = stream;
 
+  // --- MediaPipe Pose, only to get wrists ---
   pose = new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
   pose.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
   pose.onResults(drawHandsLine);
 
+  // --- Processing loop ---
   async function loop(){
     if(video.readyState>=2) await pose.send({image:video});
     requestAnimationFrame(loop);
@@ -103,6 +105,7 @@ async function startBackCamera() {
   loop();
 }
 
+// --- Draw line and detect wall hits ---
 function drawHandsLine(results){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
@@ -110,7 +113,6 @@ function drawHandsLine(results){
 
   const leftWrist = results.poseLandmarks[15]; // left wrist
   const rightWrist = results.poseLandmarks[16]; // right wrist
-
   if(!leftWrist || !rightWrist) return;
 
   const x1 = leftWrist.x * canvas.width;
@@ -118,7 +120,7 @@ function drawHandsLine(results){
   const x2 = rightWrist.x * canvas.width;
   const y2 = rightWrist.y * canvas.height;
 
-  // Draw line
+  // Draw line between wrists
   ctx.beginPath();
   ctx.moveTo(x1,y1);
   ctx.lineTo(x2,y2);
@@ -126,13 +128,13 @@ function drawHandsLine(results){
   ctx.lineWidth = 5;
   ctx.stroke();
 
-  // Check for “wall hit”
-  const hitPoints = [];
-  if(x1 <= 0 || x1 >= canvas.width || y1 <= 0 || y1 >= canvas.height) hitPoints.push({x:x1,y:y1});
-  if(x2 <= 0 || x2 >= canvas.width || y2 <= 0 || y2 >= canvas.height) hitPoints.push({x:x2,y:y2});
+  // Detect if wrists “hit” screen edges
+  const hits = [];
+  if(x1 <= 0 || x1 >= canvas.width || y1 <= 0 || y1 >= canvas.height) hits.push({x:x1,y:y1});
+  if(x2 <= 0 || x2 >= canvas.width || y2 <= 0 || y2 >= canvas.height) hits.push({x:x2,y:y2});
 
-  // Draw big red circles on hit points
-  hitPoints.forEach(p=>{
+  // Draw big red circles at hit points
+  hits.forEach(p=>{
     ctx.beginPath();
     ctx.arc(p.x,p.y,50,0,Math.PI*2);
     ctx.fillStyle="red";
