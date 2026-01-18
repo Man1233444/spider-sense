@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AR Throw Predictor – Fixed Start</title>
+<title>Hand Line AR</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -51,15 +51,6 @@ video, canvas {
   cursor:pointer;
   pointer-events:auto;
 }
-
-#debug {
-  position:fixed;
-  top:10px;
-  left:10px;
-  color:lime;
-  font-size:16px;
-  z-index:10;
-}
 </style>
 </head>
 <body>
@@ -69,12 +60,10 @@ video, canvas {
   <canvas id="canvas"></canvas>
 </div>
 
-<div id="debug">Initializing…</div>
 <div id="start">TAP TO START</div>
 
 <script>
 const startBtn = document.getElementById("start");
-const debug = document.getElementById("debug");
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -83,12 +72,8 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 let pose = null;
-let lastHand = null;
-let handVelocity = {x:0,y:0,z:0};
-let lastTimestamp = null;
 
 startBtn.addEventListener("click", async () => {
-  // Fullscreen
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
   }
@@ -99,7 +84,7 @@ startBtn.addEventListener("click", async () => {
 async function startBackCamera() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   const backCamera = devices.find(d => d.kind === "videoinput" && d.label.toLowerCase().includes("back"));
-  if(!backCamera){ debug.textContent="No back camera found!"; return; }
+  if(!backCamera){ alert("No back camera found!"); return; }
 
   const stream = await navigator.mediaDevices.getUserMedia({
     video:{deviceId:{exact:backCamera.deviceId}, width:1280, height:720},
@@ -108,8 +93,8 @@ async function startBackCamera() {
   video.srcObject = stream;
 
   pose = new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
-  pose.setOptions({modelComplexity:2,smoothLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
-  pose.onResults(drawHandPredictor);
+  pose.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  pose.onResults(drawHandsLine);
 
   async function loop(){
     if(video.readyState>=2) await pose.send({image:video});
@@ -118,58 +103,41 @@ async function startBackCamera() {
   loop();
 }
 
-function drawHandPredictor(results){
+function drawHandsLine(results){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  if(!results.poseLandmarks){ debug.textContent="No body detected"; return; }
+  if(!results.poseLandmarks) return;
 
-  debug.textContent="Tracking hand…";
+  const leftWrist = results.poseLandmarks[15]; // left wrist
+  const rightWrist = results.poseLandmarks[16]; // right wrist
 
-  // Right hand (landmark 16 = wrist)
-  const hand = results.poseLandmarks[16];
-  const timestamp = performance.now()/1000;
+  if(!leftWrist || !rightWrist) return;
 
-  if(lastHand && lastTimestamp){
-    const dt = timestamp - lastTimestamp;
-    handVelocity.x = (hand.x - lastHand.x)/dt;
-    handVelocity.y = (hand.y - lastHand.y)/dt;
-    handVelocity.z = (hand.z - lastHand.z)/dt;
-  }
+  const x1 = leftWrist.x * canvas.width;
+  const y1 = leftWrist.y * canvas.height;
+  const x2 = rightWrist.x * canvas.width;
+  const y2 = rightWrist.y * canvas.height;
 
-  lastHand = hand;
-  lastTimestamp = timestamp;
-
-  // Draw hand
-  const hx = hand.x*canvas.width;
-  const hy = hand.y*canvas.height;
+  // Draw line
   ctx.beginPath();
-  ctx.arc(hx,hy,10,0,Math.PI*2);
-  ctx.fillStyle="red";
-  ctx.fill();
-
-  // Predicted trajectory
-  const points = [];
-  let px = hand.x, py = hand.y, pz = hand.z;
-  let vx = handVelocity.x*0.05;
-  let vy = handVelocity.y*0.05;
-  const g = 0.0015;
-
-  for(let i=0;i<60;i++){
-    px += vx;
-    py += vy;
-    vy += g;
-    points.push({x:px*canvas.width, y:py*canvas.height});
-  }
-
-  ctx.beginPath();
-  for(let i=0;i<points.length;i++){
-    const p = points[i];
-    if(i===0) ctx.moveTo(p.x,p.y);
-    else ctx.lineTo(p.x,p.y);
-  }
-  ctx.strokeStyle="lime";
-  ctx.lineWidth=3;
+  ctx.moveTo(x1,y1);
+  ctx.lineTo(x2,y2);
+  ctx.strokeStyle = "lime";
+  ctx.lineWidth = 5;
   ctx.stroke();
+
+  // Check for “wall hit”
+  const hitPoints = [];
+  if(x1 <= 0 || x1 >= canvas.width || y1 <= 0 || y1 >= canvas.height) hitPoints.push({x:x1,y:y1});
+  if(x2 <= 0 || x2 >= canvas.width || y2 <= 0 || y2 >= canvas.height) hitPoints.push({x:x2,y:y2});
+
+  // Draw big red circles on hit points
+  hitPoints.forEach(p=>{
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,50,0,Math.PI*2);
+    ctx.fillStyle="red";
+    ctx.fill();
+  });
 }
 </script>
 
