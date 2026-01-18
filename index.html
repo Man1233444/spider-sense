@@ -18,14 +18,17 @@ html, body {
 
 #start {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   background: black;
   color: white;
   font-size: 36px;
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 30;
+  z-index: 9999; /* ensure it's on top */
   cursor: pointer;
 }
 
@@ -35,11 +38,10 @@ html, body {
   background: black;
   color: white;
   font-size: 36px;
-  display: flex;
+  display: none;
   justify-content: center;
   align-items: center;
-  z-index: 20;
-  display: none;
+  z-index: 9998;
 }
 
 video, canvas {
@@ -85,6 +87,7 @@ startBtn.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
     await document.documentElement.requestFullscreen();
   }
+
   startBtn.style.display = "none"; // hide start button
   loading.style.display = "flex";  // show loading screen
   await startBackCamera();
