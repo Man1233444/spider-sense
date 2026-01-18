@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Full 3D Predictive Skeleton AR</title>
+<title>Robust Full-Body Tracking</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -70,21 +70,14 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 let pose = null;
-let lastLandmarks3D = [];
+let lastLandmarks = [];
 
-// Skeleton hierarchy (parent → child)
+// Parent → child connections
 const skeleton = [
-  [0,1],[1,2],[2,3],[0,4],[4,5],[5,6], // head & shoulders
-  [11,13],[13,15],[12,14],[14,16],     // arms
-  [11,23],[23,25],[25,27],[12,24],[24,26],[26,28] // torso & legs
+  [0,1],[1,2],[2,3],[0,4],[4,5],[5,6],
+  [11,13],[13,15],[12,14],[14,16],
+  [11,23],[23,25],[25,27],[12,24],[24,26],[26,28]
 ];
-
-// Default proportions in meters (rough human ratios)
-const proportions = {
-  upperArm: 0.25, lowerArm: 0.25,
-  upperLeg: 0.3, lowerLeg: 0.3,
-  torso: 0.4, head: 0.25
-};
 
 startBtn.addEventListener("click", async () => {
   if (document.documentElement.requestFullscreen) {
@@ -119,13 +112,13 @@ async function startBackCamera() {
   });
 
   pose.setOptions({
-    modelComplexity: 2, 
+    modelComplexity: 1, // medium complexity
     smoothLandmarks: true,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
 
-  pose.onResults(drawPredictiveSkeleton3D);
+  pose.onResults(drawStableSkeleton);
 
   async function loop() {
     if(video.readyState >= 2) {
@@ -137,8 +130,8 @@ async function startBackCamera() {
   loop();
 }
 
-// --- Predictive 3D skeleton ---
-function drawPredictiveSkeleton3D(results) {
+// Draw only detected joints + lightly predict missing ones
+function drawStableSkeleton(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!results.poseLandmarks) {
@@ -148,53 +141,28 @@ function drawPredictiveSkeleton3D(results) {
 
   debug.textContent = "Body detected";
 
-  const landmarks3D = [];
+  const landmarks = [];
 
-  // Step 1: Copy or interpolate landmarks
-  results.poseLandmarks.forEach((lm,i)=>{
-    if(lm.visibility<0.5 && lastLandmarks3D[i]){
-      landmarks3D[i] = lastLandmarks3D[i];
+  results.poseLandmarks.forEach((lm, i) => {
+    if(lm.visibility < 0.5 && lastLandmarks[i]){
+      // Only interpolate slightly
+      landmarks[i] = {
+        x: lastLandmarks[i].x * 0.8 + lm.x * 0.2,
+        y: lastLandmarks[i].y * 0.8 + lm.y * 0.2,
+        visibility: 0.5
+      };
     } else {
-      landmarks3D[i] = { x: lm.x, y: lm.y, z: lm.z, visibility: lm.visibility };
+      landmarks[i] = lm;
     }
   });
 
-  // Step 2: Predict missing joints along skeleton
-  skeleton.forEach(([parentIdx, childIdx])=>{
-    const parent = landmarks3D[parentIdx];
-    const child = landmarks3D[childIdx];
-    if(!child || child.visibility<0.5){
-      if(parent && lastLandmarks3D[childIdx]){
-        // Predict using last frame limb vector
-        const dx = lastLandmarks3D[childIdx].x - lastLandmarks3D[parentIdx].x;
-        const dy = lastLandmarks3D[childIdx].y - lastLandmarks3D[parentIdx].y;
-        const dz = lastLandmarks3D[childIdx].z - lastLandmarks3D[parentIdx].z;
-        landmarks3D[childIdx] = {
-          x: parent.x + dx,
-          y: parent.y + dy,
-          z: parent.z + dz,
-          visibility: 0.5
-        };
-      } else if(parent){
-        // Predict using default proportion
-        let proportion = 0.2; // fallback
-        landmarks3D[childIdx] = {
-          x: parent.x + proportion,
-          y: parent.y + proportion,
-          z: parent.z || 0,
-          visibility: 0.5
-        };
-      }
-    }
-  });
+  lastLandmarks = landmarks;
 
-  lastLandmarks3D = landmarks3D;
-
-  // Step 3: Draw skeleton
-  skeleton.forEach(([parentIdx, childIdx])=>{
-    const p = landmarks3D[parentIdx];
-    const c = landmarks3D[childIdx];
-    if(p && c){
+  // Draw skeleton lines for visible joints only
+  skeleton.forEach(([pIdx,cIdx])=>{
+    const p = landmarks[pIdx];
+    const c = landmarks[cIdx];
+    if(p.visibility>0.5 && c.visibility>0.5){
       ctx.beginPath();
       ctx.moveTo(p.x*canvas.width, p.y*canvas.height);
       ctx.lineTo(c.x*canvas.width, c.y*canvas.height);
@@ -204,14 +172,16 @@ function drawPredictiveSkeleton3D(results) {
     }
   });
 
-  // Step 4: Draw joints
-  landmarks3D.forEach(lm=>{
-    const x = lm.x*canvas.width;
-    const y = lm.y*canvas.height;
-    ctx.beginPath();
-    ctx.arc(x,y,6,0,Math.PI*2);
-    ctx.fillStyle = "yellow";
-    ctx.fill();
+  // Draw joints
+  landmarks.forEach(lm=>{
+    if(lm.visibility>0.5){
+      const x = lm.x*canvas.width;
+      const y = lm.y*canvas.height;
+      ctx.beginPath();
+      ctx.arc(x,y,6,0,Math.PI*2);
+      ctx.fillStyle = "yellow";
+      ctx.fill();
+    }
   });
 }
 </script>
