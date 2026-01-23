@@ -13,6 +13,8 @@
     }
     canvas {
       display: block;
+      width: 100%;
+      height: 100%;
     }
     #startBtn {
       position: absolute;
@@ -95,7 +97,7 @@
       confidence += riseRate * deltaTime;
       if (confidence > 1) confidence = 1;
 
-      // Map confidence to oscillator gain (0=low, 1=stable)
+      // Map confidence to oscillator frequency and volume
       oscillator.frequency.setValueAtTime(220 + confidence*50, audioCtx.currentTime);
       oscillator.volume = 0.01 + confidence*0.05;
     }
@@ -139,6 +141,16 @@
       initSound();
       running = true;
       startBtn.style.display = 'none';
+
+      // --- Request fullscreen ---
+      if (canvas.requestFullscreen) {
+        canvas.requestFullscreen();
+      } else if (canvas.webkitRequestFullscreen) { // Safari / iOS
+        canvas.webkitRequestFullscreen();
+      } else if (canvas.msRequestFullscreen) { // IE
+        canvas.msRequestFullscreen();
+      }
+
       animate();
     };
 
