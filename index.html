@@ -1,219 +1,128 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>VR Brain Confidence Trainer - Phase 1 Motion Sensitive</title>
-  <style>
-    html, body {
-      margin: 0;
-      overflow: hidden;
-      height: 100%;
-      background: black;
-      touch-action: none;
-    }
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    #startBtn {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      padding: 20px 40px;
-      font-size: 24px;
-      background: green;
-      color: white;
-      border: none;
-      border-radius: 12px;
-      cursor: pointer;
-      z-index: 10;
-    }
-    #stopBtn {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      padding: 10px 20px;
-      font-size: 16px;
-      background: red;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      z-index: 10;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Barcode Scanner</title>
+<style>
+  body, html {
+    margin: 0; padding: 0; overflow: hidden; font-family: sans-serif;
+    text-align: center;
+  }
+  #startScreen {
+    position: absolute;
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background-color: #f0f0f0;
+  }
+  #startBtn {
+    margin-top: 20px;
+    padding: 1em 2em;
+    font-size: 1.5em;
+    cursor: pointer;
+  }
+  #video { display: none; }
+  canvas { position: absolute; top: 0; left: 0; }
+</style>
 </head>
 <body>
+
+<div id="startScreen">
+  <h1>AR Barcode Scanner</h1>
+  <svg id="barcode"></svg>
   <button id="startBtn">Start</button>
-  <button id="stopBtn">Stop</button>
-  <canvas id="vrCanvas"></canvas>
+</div>
 
-  <script>
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const canvas = document.getElementById('vrCanvas');
-    const ctx = canvas.getContext('2d');
-    let video, stream, audioCtx, oscillator, gainNode;
-    let running = false;
-    let confidence = 0;        // 0 = low, 1 = high
-    let targetConfidence = 0;  // what confidence should move toward
-    let lastTime = Date.now();
-    let wakeLock = null;
+<video id="video" autoplay></video>
+<canvas id="overlay"></canvas>
 
-    // --- Motion detection variables ---
-    let lastFrame = null;
-    const motionSensitivity = 0.02; // adjust for how sensitive head movement is
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+<script>
+const startBtn = document.getElementById('startBtn');
+const startScreen = document.getElementById('startScreen');
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
 
-    // --- Initialize Back Camera ---
-    async function initCamera() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false
-        });
-        video = document.createElement('video');
-        video.srcObject = stream;
-        video.play();
-      } catch (err) {
-        alert('Error accessing back camera: ' + err);
-      }
-    }
+// Generate a barcode you can print
+JsBarcode("#barcode", "AR123456", {format: "CODE128", width: 2, height: 100});
 
-    // --- Initialize Sound ---
-    function initSound() {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      oscillator = audioCtx.createOscillator();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(220, audioCtx.currentTime); // Base tone
-      gainNode = audioCtx.createGain();
-      gainNode.gain.value = 0.01; // Very soft
-      oscillator.connect(gainNode).connect(audioCtx.destination);
-      oscillator.start();
-    }
+// Three.js variables
+let scene, camera, renderer, cube;
+let scanning = false;
 
-    // --- Request Wake Lock ---
-    async function requestWakeLock() {
-      try {
-        wakeLock = await navigator.wakeLock.request('screen');
-        wakeLock.addEventListener('release', () => console.log('Wake Lock released'));
-      } catch (err) {
-        console.error('Wake Lock error:', err);
-      }
-    }
+startBtn.onclick = async () => {
+  // Fullscreen
+  if (document.documentElement.requestFullscreen) {
+    await document.documentElement.requestFullscreen();
+  }
 
-    // --- Update Confidence & Sound ---
-    function updateConfidence(deltaTime) {
-      // Smoothly move actual confidence toward targetConfidence
-      const smoothing = 0.05;
-      confidence += (targetConfidence - confidence) * smoothing;
+  // Hide start screen
+  startScreen.style.display = 'none';
 
-      // Map confidence to oscillator frequency and gain
-      oscillator.frequency.setValueAtTime(220 + confidence*50, audioCtx.currentTime);
-      gainNode.gain.setValueAtTime(0.01 + confidence*0.05, audioCtx.currentTime);
-    }
+  // Start camera
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  video.srcObject = stream;
+  video.play();
 
-    // --- Draw Green Circle Illusion ---
-    function drawIllusions() {
-      if (!video) return;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  scanning = true;
+  overlay.width = window.innerWidth;
+  overlay.height = window.innerHeight;
 
-      // --- Green circle as alignment indicator ---
-      const maxOffset = 50 * (1 - confidence); // max jitter when low confidence
-      const offsetX = (Math.random() - 0.5) * maxOffset;
-      const offsetY = (Math.random() - 0.5) * maxOffset;
+  init3D();
+  requestAnimationFrame(scanLoop);
+};
 
-      const centerX = canvas.width / 2 + offsetX;
-      const centerY = canvas.height / 2 + offsetY;
-      const radius = 30; // fixed size
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(0,255,0,${1 - confidence})`; // fades as confidence rises
-      ctx.lineWidth = 4;
-      ctx.stroke();
-    }
+// Initialize Three.js scene
+function init3D() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({ alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-    // --- Animation Loop ---
-    function animate() {
-      if (!running) return;
-      const now = Date.now();
-      const deltaTime = (now - lastTime) / 1000;
+  const geometry = new THREE.BoxGeometry();
+  const material = new THREE.MeshNormalMaterial();
+  cube = new THREE.Mesh(geometry, material);
+  cube.visible = false;
+  scene.add(cube);
 
-      // --- Motion detection ---
-      let motionFactor = 0;
-      if (video && video.readyState >= 2) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = 64;
-        tempCanvas.height = 36;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-        const currentFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+  camera.position.z = 5;
+}
 
-        if (lastFrame) {
-          let diff = 0;
-          for (let i = 0; i < currentFrame.data.length; i += 4) {
-            diff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
-          }
-          motionFactor = diff / (currentFrame.data.length / 4) / 255;
-        }
-        lastFrame = currentFrame;
-      }
+// Scan loop
+function scanLoop() {
+  if (!scanning) return;
 
-      // Reduce targetConfidence if motion exceeds sensitivity
-      targetConfidence -= motionFactor * motionSensitivity;
-      if (targetConfidence < 0) targetConfidence = 0;
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+  const imageData = ctx.getImageData(0, 0, overlay.width, overlay.height);
+  const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-      // Gradually increase targetConfidence if holding still (15s fade-in)
-      targetConfidence += deltaTime / 15;
-      if (targetConfidence > 1) targetConfidence = 1;
+  if (code) {
+    // Show cube at barcode center
+    const x = (code.location.topLeftCorner.x + code.location.bottomRightCorner.x) / 2;
+    const y = (code.location.topLeftCorner.y + code.location.bottomRightCorner.y) / 2;
 
-      updateConfidence(deltaTime);
-      drawIllusions();
-      requestAnimationFrame(animate);
-    }
+    // Map 2D camera coords to Three.js coordinates
+    const nx = (x / overlay.width) * 2 - 1;
+    const ny = -(y / overlay.height) * 2 + 1;
 
-    // --- Start / Stop ---
-    startBtn.onclick = async () => {
-      await initCamera();
-      initSound();
-      running = true;
-      startBtn.style.display = 'none';
+    cube.visible = true;
+    cube.position.x = nx * 5;
+    cube.position.y = ny * 5;
+    cube.rotation.x += 0.01;
+    cube.rotation.y += 0.01;
+  }
 
-      // Request fullscreen
-      if (canvas.requestFullscreen) canvas.requestFullscreen();
-      else if (canvas.webkitRequestFullscreen) canvas.webkitRequestFullscreen();
-      else if (canvas.msRequestFullscreen) canvas.msRequestFullscreen();
+  renderer.render(scene, camera);
+  requestAnimationFrame(scanLoop);
+}
+</script>
 
-      // Request wake lock
-      requestWakeLock();
-
-      animate();
-    };
-
-    stopBtn.onclick = () => {
-      running = false;
-      targetConfidence = 0;
-      confidence = 0;
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      if (oscillator) oscillator.stop();
-      startBtn.style.display = 'block';
-    };
-
-    window.addEventListener('resize', () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    });
-
-    document.addEventListener('visibilitychange', () => {
-      if (wakeLock !== null && document.hidden) {
-        wakeLock.release();
-        wakeLock = null;
-      }
-    });
-  </script>
 </body>
 </html>
