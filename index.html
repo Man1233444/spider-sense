@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>VR Brain Confidence Trainer - Phase 1</title>
+  <title>VR Brain Confidence Trainer - Phase 1 Upgraded</title>
   <style>
     html, body {
       margin: 0;
@@ -55,10 +55,12 @@
     const stopBtn = document.getElementById('stopBtn');
     const canvas = document.getElementById('vrCanvas');
     const ctx = canvas.getContext('2d');
-    let video, stream, audioCtx, oscillator;
+    let video, stream, audioCtx, oscillator, gainNode;
     let running = false;
     let confidence = 0; // 0=low, 1=high
+    let targetConfidence = 0;
     let lastTime = Date.now();
+    let wakeLock = null;
 
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -84,22 +86,31 @@
       oscillator = audioCtx.createOscillator();
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(220, audioCtx.currentTime); // Base tone
-      const gainNode = audioCtx.createGain();
+      gainNode = audioCtx.createGain();
       gainNode.gain.value = 0.01; // Very soft
       oscillator.connect(gainNode).connect(audioCtx.destination);
       oscillator.start();
     }
 
+    // --- Request Wake Lock ---
+    async function requestWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => console.log('Wake Lock released'));
+      } catch (err) {
+        console.error('Wake Lock error:', err);
+      }
+    }
+
     // --- Update Confidence & Sound ---
     function updateConfidence(deltaTime) {
-      // For demo: confidence rises gradually if head steady (placeholder)
-      const riseRate = 0.05; // per second
-      confidence += riseRate * deltaTime;
-      if (confidence > 1) confidence = 1;
+      // Slowly move actual confidence toward targetConfidence
+      const smoothing = 0.05; // smaller = slower, more stable
+      confidence += (targetConfidence - confidence) * smoothing;
 
-      // Map confidence to oscillator frequency and volume
+      // Map confidence to oscillator frequency and gain
       oscillator.frequency.setValueAtTime(220 + confidence*50, audioCtx.currentTime);
-      oscillator.volume = 0.01 + confidence*0.05;
+      gainNode.gain.setValueAtTime(0.01 + confidence*0.05, audioCtx.currentTime);
     }
 
     // --- Draw Illusions ---
@@ -112,6 +123,8 @@
       const now = Date.now();
       const elapsed = (now - lastTime) / 1000;
       lastTime = now;
+
+      // Target confidence determines speed and opacity
       const flowSpeed = (1 - confidence) * 50; // faster when low confidence
 
       for (let i = 0; i < 60; i++) {
@@ -130,6 +143,11 @@
       if (!running) return;
       const now = Date.now();
       const deltaTime = (now - lastTime) / 1000;
+
+      // --- For demo: increase targetConfidence gradually if stable (10–15 sec to peak) ---
+      targetConfidence += deltaTime / 15; // reach full confidence in 15 seconds
+      if (targetConfidence > 1) targetConfidence = 1;
+
       updateConfidence(deltaTime);
       drawIllusions();
       requestAnimationFrame(animate);
@@ -142,23 +160,22 @@
       running = true;
       startBtn.style.display = 'none';
 
-      // --- Request fullscreen ---
-      if (canvas.requestFullscreen) {
-        canvas.requestFullscreen();
-      } else if (canvas.webkitRequestFullscreen) { // Safari / iOS
-        canvas.webkitRequestFullscreen();
-      } else if (canvas.msRequestFullscreen) { // IE
-        canvas.msRequestFullscreen();
-      }
+      // Request fullscreen
+      if (canvas.requestFullscreen) canvas.requestFullscreen();
+      else if (canvas.webkitRequestFullscreen) canvas.webkitRequestFullscreen();
+      else if (canvas.msRequestFullscreen) canvas.msRequestFullscreen();
+
+      // Request wake lock
+      requestWakeLock();
 
       animate();
     };
 
     stopBtn.onclick = () => {
       running = false;
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
+      targetConfidence = 0;
+      confidence = 0;
+      if (stream) stream.getTracks().forEach(track => track.stop());
       if (oscillator) oscillator.stop();
       startBtn.style.display = 'block';
     };
@@ -166,6 +183,14 @@
     window.addEventListener('resize', () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+    });
+
+    // Optional: release wake lock on page hide
+    document.addEventListener('visibilitychange', () => {
+      if (wakeLock !== null && document.hidden) {
+        wakeLock.release();
+        wakeLock = null;
+      }
     });
   </script>
 </body>
