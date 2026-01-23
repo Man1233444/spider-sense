@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>VR Brain Confidence Trainer - Phase 1 Upgraded</title>
+  <title>VR Brain Confidence Trainer - Phase 1 Motion Sensitive</title>
   <style>
     html, body {
       margin: 0;
@@ -57,10 +57,14 @@
     const ctx = canvas.getContext('2d');
     let video, stream, audioCtx, oscillator, gainNode;
     let running = false;
-    let confidence = 0; // 0=low, 1=high
-    let targetConfidence = 0;
+    let confidence = 0;        // 0 = low, 1 = high
+    let targetConfidence = 0;  // what confidence should move toward
     let lastTime = Date.now();
     let wakeLock = null;
+
+    // --- Motion detection variables ---
+    let lastFrame = null;
+    const motionSensitivity = 0.02; // adjust for how sensitive head movement is
 
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -105,7 +109,7 @@
     // --- Update Confidence & Sound ---
     function updateConfidence(deltaTime) {
       // Smoothly move actual confidence toward targetConfidence
-      const smoothing = 0.05; // smaller = slower, more stable
+      const smoothing = 0.05;
       confidence += (targetConfidence - confidence) * smoothing;
 
       // Map confidence to oscillator frequency and gain
@@ -113,7 +117,7 @@
       gainNode.gain.setValueAtTime(0.01 + confidence*0.05, audioCtx.currentTime);
     }
 
-    // --- Draw Visual Cue (Green Circle) ---
+    // --- Draw Green Circle Illusion ---
     function drawIllusions() {
       if (!video) return;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -139,7 +143,31 @@
       const now = Date.now();
       const deltaTime = (now - lastTime) / 1000;
 
-      // Gradually increase targetConfidence over 15 seconds if holding still
+      // --- Motion detection ---
+      let motionFactor = 0;
+      if (video && video.readyState >= 2) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 64;
+        tempCanvas.height = 36;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+        const currentFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+
+        if (lastFrame) {
+          let diff = 0;
+          for (let i = 0; i < currentFrame.data.length; i += 4) {
+            diff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
+          }
+          motionFactor = diff / (currentFrame.data.length / 4) / 255;
+        }
+        lastFrame = currentFrame;
+      }
+
+      // Reduce targetConfidence if motion exceeds sensitivity
+      targetConfidence -= motionFactor * motionSensitivity;
+      if (targetConfidence < 0) targetConfidence = 0;
+
+      // Gradually increase targetConfidence if holding still (15s fade-in)
       targetConfidence += deltaTime / 15;
       if (targetConfidence > 1) targetConfidence = 1;
 
@@ -180,7 +208,6 @@
       canvas.height = window.innerHeight;
     });
 
-    // Optional: release wake lock on page hide
     document.addEventListener('visibilitychange', () => {
       if (wakeLock !== null && document.hidden) {
         wakeLock.release();
