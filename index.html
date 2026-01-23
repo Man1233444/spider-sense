@@ -104,7 +104,7 @@
 
     // --- Update Confidence & Sound ---
     function updateConfidence(deltaTime) {
-      // Slowly move actual confidence toward targetConfidence
+      // Smoothly move actual confidence toward targetConfidence
       const smoothing = 0.05; // smaller = slower, more stable
       confidence += (targetConfidence - confidence) * smoothing;
 
@@ -113,29 +113,24 @@
       gainNode.gain.setValueAtTime(0.01 + confidence*0.05, audioCtx.currentTime);
     }
 
-    // --- Draw Illusions ---
+    // --- Draw Visual Cue (Green Circle) ---
     function drawIllusions() {
       if (!video) return;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // --- Radial Flow Illusion ---
-      const flowRadius = canvas.width / 2;
-      const now = Date.now();
-      const elapsed = (now - lastTime) / 1000;
-      lastTime = now;
+      // --- Green circle as alignment indicator ---
+      const maxOffset = 50 * (1 - confidence); // max jitter when low confidence
+      const offsetX = (Math.random() - 0.5) * maxOffset;
+      const offsetY = (Math.random() - 0.5) * maxOffset;
 
-      // Target confidence determines speed and opacity
-      const flowSpeed = (1 - confidence) * 50; // faster when low confidence
-
-      for (let i = 0; i < 60; i++) {
-        const angle = (i / 60) * Math.PI * 2 + elapsed * flowSpeed * 0.1;
-        const x = canvas.width/2 + Math.cos(angle) * flowRadius * 0.8;
-        const y = canvas.height/2 + Math.sin(angle) * flowRadius * 0.8;
-        ctx.beginPath();
-        ctx.arc(x, y, 2, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(0,255,0,${1-confidence})`; // fades as confidence grows
-        ctx.fill();
-      }
+      const centerX = canvas.width / 2 + offsetX;
+      const centerY = canvas.height / 2 + offsetY;
+      const radius = 30; // fixed size
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(0,255,0,${1 - confidence})`; // fades as confidence rises
+      ctx.lineWidth = 4;
+      ctx.stroke();
     }
 
     // --- Animation Loop ---
@@ -144,8 +139,8 @@
       const now = Date.now();
       const deltaTime = (now - lastTime) / 1000;
 
-      // --- For demo: increase targetConfidence gradually if stable (10–15 sec to peak) ---
-      targetConfidence += deltaTime / 15; // reach full confidence in 15 seconds
+      // Gradually increase targetConfidence over 15 seconds if holding still
+      targetConfidence += deltaTime / 15;
       if (targetConfidence > 1) targetConfidence = 1;
 
       updateConfidence(deltaTime);
