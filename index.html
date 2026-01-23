@@ -1,137 +1,160 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Hand Ray Tracker</title>
-
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
-<style>
-html, body {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  background: black;
-  overflow: hidden;
-}
-
-video, canvas {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-#start {
-  position: fixed;
-  inset: 0;
-  background: black;
-  color: white;
-  font-size: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 999;
-  cursor: pointer;
-}
-</style>
+  <meta charset="UTF-8">
+  <title>VR Brain Confidence Trainer - Phase 1</title>
+  <style>
+    html, body {
+      margin: 0;
+      overflow: hidden;
+      height: 100%;
+      background: black;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+    }
+    #startBtn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 20px 40px;
+      font-size: 24px;
+      background: green;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      z-index: 10;
+    }
+    #stopBtn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 10px 20px;
+      font-size: 16px;
+      background: red;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      z-index: 10;
+    }
+  </style>
 </head>
 <body>
+  <button id="startBtn">Start</button>
+  <button id="stopBtn">Stop</button>
+  <canvas id="vrCanvas"></canvas>
 
-<video id="video" playsinline autoplay></video>
-<canvas id="canvas"></canvas>
-<div id="start">TAP TO START</div>
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const canvas = document.getElementById('vrCanvas');
+    const ctx = canvas.getContext('2d');
+    let video, stream, audioCtx, oscillator;
+    let running = false;
+    let confidence = 0; // 0=low, 1=high
+    let lastTime = Date.now();
 
-<script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const startBtn = document.getElementById("start");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+    // --- Initialize Back Camera ---
+    async function initCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video = document.createElement('video');
+        video.srcObject = stream;
+        video.play();
+      } catch (err) {
+        alert('Error accessing back camera: ' + err);
+      }
+    }
 
-// Smoothing for wrist position
-let smoothedWx = null;
-let smoothedWy = null;
+    // --- Initialize Sound ---
+    function initSound() {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      oscillator = audioCtx.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(220, audioCtx.currentTime); // Base tone
+      const gainNode = audioCtx.createGain();
+      gainNode.gain.value = 0.01; // Very soft
+      oscillator.connect(gainNode).connect(audioCtx.destination);
+      oscillator.start();
+    }
 
-startBtn.addEventListener("click", async () => {
-  startBtn.style.display = "none";
-  document.documentElement.requestFullscreen?.().catch(()=>{});
-  startHandTracker();
-});
+    // --- Update Confidence & Sound ---
+    function updateConfidence(deltaTime) {
+      // For demo: confidence rises gradually if head steady (placeholder)
+      const riseRate = 0.05; // per second
+      confidence += riseRate * deltaTime;
+      if (confidence > 1) confidence = 1;
 
-function startHandTracker() {
-  const hands = new Hands({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-  });
+      // Map confidence to oscillator gain (0=low, 1=stable)
+      oscillator.frequency.setValueAtTime(220 + confidence*50, audioCtx.currentTime);
+      oscillator.volume = 0.01 + confidence*0.05;
+    }
 
-  hands.setOptions({
-    maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.8,
-    minTrackingConfidence: 0.8
-  });
+    // --- Draw Illusions ---
+    function drawIllusions() {
+      if (!video) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  hands.onResults(results => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // --- Radial Flow Illusion ---
+      const flowRadius = canvas.width / 2;
+      const now = Date.now();
+      const elapsed = (now - lastTime) / 1000;
+      lastTime = now;
+      const flowSpeed = (1 - confidence) * 50; // faster when low confidence
 
-    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+      for (let i = 0; i < 60; i++) {
+        const angle = (i / 60) * Math.PI * 2 + elapsed * flowSpeed * 0.1;
+        const x = canvas.width/2 + Math.cos(angle) * flowRadius * 0.8;
+        const y = canvas.height/2 + Math.sin(angle) * flowRadius * 0.8;
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(0,255,0,${1-confidence})`; // fades as confidence grows
+        ctx.fill();
+      }
+    }
 
-    const hand = results.multiHandLandmarks[0];
+    // --- Animation Loop ---
+    function animate() {
+      if (!running) return;
+      const now = Date.now();
+      const deltaTime = (now - lastTime) / 1000;
+      updateConfidence(deltaTime);
+      drawIllusions();
+      requestAnimationFrame(animate);
+    }
 
-    const wrist = hand[0];      // wrist
-    const indexBase = hand[5];  // index finger base
+    // --- Start / Stop ---
+    startBtn.onclick = async () => {
+      await initCamera();
+      initSound();
+      running = true;
+      startBtn.style.display = 'none';
+      animate();
+    };
 
-    // Convert to canvas coordinates
-    const wx = wrist.x * canvas.width;
-    const wy = wrist.y * canvas.height;
-    const ix = indexBase.x * canvas.width;
-    const iy = indexBase.y * canvas.height;
+    stopBtn.onclick = () => {
+      running = false;
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      if (oscillator) oscillator.stop();
+      startBtn.style.display = 'block';
+    };
 
-    // Simple smoothing
-    if (smoothedWx === null) smoothedWx = wx;
-    if (smoothedWy === null) smoothedWy = wy;
-    smoothedWx = smoothedWx * 0.7 + wx * 0.3;
-    smoothedWy = smoothedWy * 0.7 + wy * 0.3;
-
-    // Direction vector from wrist → index base
-    let dx = ix - smoothedWx;
-    let dy = iy - smoothedWy;
-    const len = Math.hypot(dx, dy);
-    if (len < 0.001) return;
-    dx /= len;
-    dy /= len;
-
-    // Draw a long green line (2000px) forward
-    const endX = smoothedWx + dx * 2000;
-    const endY = smoothedWy + dy * 2000;
-
-    ctx.beginPath();
-    ctx.moveTo(smoothedWx, smoothedWy);
-    ctx.lineTo(endX, endY);
-    ctx.strokeStyle = "lime";
-    ctx.lineWidth = 6;
-    ctx.stroke();
-
-    // Draw a big circle at the wrist for tracking
-    ctx.beginPath();
-    ctx.arc(smoothedWx, smoothedWy, 20, 0, Math.PI*2);
-    ctx.fillStyle = "lime";
-    ctx.fill();
-  });
-
-  const camera = new Camera(video, {
-    facingMode: "environment",
-    width: 1280,
-    height: 720,
-    onFrame: async () => { await hands.send({ image: video }); }
-  });
-
-  camera.start();
-}
-</script>
-
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+  </script>
 </body>
 </html>
